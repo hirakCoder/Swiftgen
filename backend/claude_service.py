@@ -1,1192 +1,666 @@
 import os
 import json
-from typing import Dict, List
+import httpx
+from typing import Dict, List, Optional, Tuple
 from dotenv import load_dotenv
+import asyncio
+from datetime import datetime
+import random
+import hashlib
+import re
 
 load_dotenv()
 
 class ClaudeService:
     def __init__(self):
-        api_key = os.getenv("CLAUDE_API_KEY", "YOUR_CLAUDE_API_KEY_HERE")
-        if api_key == "YOUR_CLAUDE_API_KEY_HERE":
-            print("WARNING: Claude API key not set! Using smart defaults instead.")
+        self.api_key = os.getenv("CLAUDE_API_KEY", "")
+        self.api_url = "https://api.anthropic.com/v1/messages"
+        self.model = "claude-3-opus-20240229"
+        self.headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
 
-        self.api_key = api_key
+        # System prompt that makes Claude understand its role
+        self.system_prompt = """You are SwiftGen AI, the world's most creative iOS app developer. You have deep expertise in:
+- Swift 5.9 and SwiftUI
+- Creating UNIQUE, beautiful iOS apps that stand out
+- Understanding user intent perfectly
+- Apple's Human Interface Guidelines
+- Modern app design trends and animations
 
-    async def generate_ios_app(self, description: str, app_name: str) -> Dict:
-        """Generate complete iOS app code from description"""
+Your goal is to create iOS apps that are:
+1. EXACTLY what the user asked for (not generic templates)
+2. UNIQUE - even if two users ask for "timer app", they should get completely different implementations
+3. Production-ready with proper error handling
+4. Visually stunning with thoughtful animations
+5. Following iOS best practices
 
-        # For now, we'll always use smart defaults since the API is having issues
-        print(f"Generating app '{app_name}' based on description: {description}")
+You think creatively and never produce cookie-cutter solutions. Each app you create should feel special and crafted with care."""
 
-        # Always return a functional app based on the description
-        return self._generate_smart_default_app(app_name, description)
+    async def generate_ios_app(self, description: str, app_name: Optional[str] = None) -> Dict:
+        """Generate iOS app using Claude's full intelligence"""
 
-    async def modify_ios_app(self, app_name: str, original_description: str, modification_request: str, existing_files: List[Dict]) -> Dict:
-        """Modify existing iOS app based on user request"""
+        # Let Claude handle EVERYTHING - app name extraction, understanding, generation
+        if not self.api_key or self.api_key == "YOUR_CLAUDE_API_KEY_HERE":
+            raise ValueError("Claude API key is required. Please set CLAUDE_API_KEY in .env file")
 
-        print(f"Modifying app '{app_name}' based on request: {modification_request}")
+        try:
+            # Create a prompt that lets Claude shine
+            prompt = self._create_intelligent_generation_prompt(description, app_name)
 
-        # Check if this is a manual edit
+            # Call Claude API
+            response = await self._call_claude_api(prompt)
+
+            if response and "files" in response:
+                print(f"Claude generated: {response.get('app_name')} with features: {response.get('features', [])}")
+                return response
+            else:
+                raise Exception("Failed to generate app. Please try with a clearer description.")
+
+        except Exception as e:
+            print(f"Error in app generation: {str(e)}")
+            raise
+
+    async def modify_ios_app(self, app_name: str, original_description: str,
+                           modification_request: str, existing_files: List[Dict]) -> Dict:
+        """Let Claude intelligently modify the app"""
+
+        # Handle manual edits
         if isinstance(existing_files, dict) and existing_files.get('manual_edit'):
-            # Handle manual code edit
-            edited_files = existing_files.get('edited_files', [])
             return {
-                "files": edited_files,
+                "files": existing_files.get('edited_files', []),
                 "features": ["Manual code edit applied"],
                 "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
                 "app_name": app_name
             }
 
-        # Analyze the modification request
-        modification_type = self._analyze_modification_request(modification_request)
+        if not self.api_key or self.api_key == "YOUR_CLAUDE_API_KEY_HERE":
+            raise ValueError("Claude API key is required for modifications")
 
-        # Get existing code
-        existing_code = {}
-        for file in existing_files:
-            filename = file["path"].split("/")[-1]
-            existing_code[filename] = file.get("content", "")
+        try:
+            # Let Claude understand and apply the modifications
+            prompt = self._create_intelligent_modification_prompt(
+                app_name, original_description, modification_request, existing_files
+            )
 
-        # Apply modifications based on type
-        if modification_type == "add_feature":
-            return self._add_feature(app_name, existing_code, modification_request)
-        elif modification_type == "modify_ui":
-            return self._modify_ui(app_name, existing_code, modification_request)
-        elif modification_type == "fix_bug":
-            return self._fix_bug(app_name, existing_code, modification_request)
+            response = await self._call_claude_api(prompt)
+
+            if response:
+                # Ensure the response has the correct structure
+                validated_response = self._validate_modification_response(response, existing_files, app_name)
+
+                if validated_response and "files" in validated_response:
+                    print(f"Claude applied modifications: {validated_response.get('modification_summary', 'Changes applied')}")
+                    return validated_response
+                else:
+                    raise Exception("Invalid modification response from Claude")
+            else:
+                raise Exception("Failed to get modification response from Claude")
+
+        except Exception as e:
+            print(f"Error in app modification: {str(e)}")
+            raise
+
+    def _validate_modification_response(self, response: Dict, existing_files: List[Dict], app_name: str) -> Dict:
+        """Validate and fix the modification response structure"""
+
+        # Ensure we have a files array
+        if "files" not in response:
+            print("Warning: No 'files' key in response, attempting to construct from existing files")
+            response["files"] = existing_files
+
+        # Validate each file has required fields
+        validated_files = []
+
+        for file in response.get("files", []):
+            # Check if it's a properly structured file
+            if isinstance(file, dict):
+                # Ensure it has both path and content
+                if "path" in file and "content" in file:
+                    validated_files.append(file)
+                elif "content" in file:
+                    # Try to infer path from existing files
+                    print(f"Warning: File missing 'path', attempting to match by content")
+                    matched = False
+                    for existing_file in existing_files:
+                        # Simple matching - in production, this could be more sophisticated
+                        if len(file["content"]) > 100 and existing_file["path"].endswith(".swift"):
+                            file["path"] = existing_file["path"]
+                            validated_files.append(file)
+                            matched = True
+                            break
+
+                    if not matched:
+                        # Default path
+                        file["path"] = "Sources/ModifiedFile.swift"
+                        validated_files.append(file)
+                else:
+                    print(f"Warning: Invalid file structure: {file}")
+            else:
+                print(f"Warning: File is not a dictionary: {file}")
+
+        # If no valid files were found, use existing files
+        if not validated_files:
+            print("Warning: No valid files in response, using existing files")
+            validated_files = existing_files
+
+        # Ensure other required fields
+        if "bundle_id" not in response:
+            response["bundle_id"] = f"com.swiftgen.{app_name.lower().replace(' ', '')}"
+
+        if "app_name" not in response:
+            response["app_name"] = app_name
+
+        if "features" not in response:
+            response["features"] = ["Modifications applied"]
+
+        response["files"] = validated_files
+
+        return response
+
+    def _create_intelligent_generation_prompt(self, description: str, app_name: Optional[str]) -> str:
+        """Create a prompt that unleashes Claude's creativity with better understanding"""
+
+        # Generate uniqueness factors
+        time_context = datetime.now()
+        unique_seed = hashlib.md5(f"{time_context.isoformat()}{description}{random.random()}".encode()).hexdigest()[:8]
+
+        # Time-based creativity hints
+        hour = time_context.hour
+        if hour < 6:
+            time_hint = "late night creative energy - think outside the box"
+        elif hour < 12:
+            time_hint = "morning freshness - bright and energizing"
+        elif hour < 17:
+            time_hint = "afternoon productivity - focused and efficient"
+        elif hour < 21:
+            time_hint = "evening relaxation - smooth and calming"
         else:
-            # Default: try to intelligently modify based on keywords
-            return self._smart_modify(app_name, existing_code, modification_request)
+            time_hint = "night time sophistication - elegant and refined"
 
-    def _analyze_modification_request(self, request: str) -> str:
-        """Analyze the type of modification requested"""
-        request_lower = request.lower()
+        # Random design inspiration
+        design_inspirations = [
+            "Apple's latest iOS design language with subtle depth",
+            "Minimalist Japanese design principles",
+            "Bold Memphis design with geometric shapes",
+            "Organic, nature-inspired interfaces",
+            "Retro-futuristic cyberpunk aesthetics",
+            "Swiss design with perfect typography",
+            "Playful material design with delightful animations",
+            "Luxury brand design language",
+            "Video game-inspired interactive elements",
+            "Magazine editorial layouts"
+        ]
 
-        if any(word in request_lower for word in ["add", "new", "create", "implement"]):
-            return "add_feature"
-        elif any(word in request_lower for word in ["change", "modify", "update", "color", "style", "ui", "design"]):
-            return "modify_ui"
-        elif any(word in request_lower for word in ["fix", "bug", "error", "crash", "issue"]):
-            return "fix_bug"
-        else:
-            return "general"
+        design_inspiration = random.choice(design_inspirations)
 
-    def _add_feature(self, app_name: str, existing_code: Dict, request: str) -> Dict:
-        """Add a new feature to the app"""
-        # This is a simplified implementation
-        # In a real scenario, you would parse the existing code and add the feature intelligently
+        # Color mood
+        color_moods = [
+            "vibrant gradients that catch the eye",
+            "sophisticated monochrome with accent colors",
+            "nature-inspired earth tones",
+            "bold contrasting colors",
+            "soft pastels with gentle transitions",
+            "deep, rich jewel tones",
+            "tech-inspired neon accents",
+            "calming ocean palette"
+        ]
 
-        modified_files = []
-        features_added = []
+        color_mood = random.choice(color_moods)
 
-        # Example: Adding a delete functionality to a todo app
-        if "delete" in request.lower() and "ContentView.swift" in existing_code:
-            content_view = existing_code["ContentView.swift"]
+        # Analyze the request to understand intent better
+        desc_lower = description.lower()
+        clarification = ""
 
-            # Check if it's a todo app
-            if "TodoItem" in content_view and "onDelete" not in content_view:
-                # Add delete functionality
-                modified_content = content_view.replace(
-                    "ForEach(todos) { todo in",
-                    """ForEach(todos) { todo in"""
-                )
+        # Check for theme/style references
+        if "theme" in desc_lower or "style" in desc_lower or "like" in desc_lower:
+            clarification = """
+IMPORTANT CLARIFICATION:
+If the user mentions "X theme" or "X style" or "like X", they usually mean:
+- Create the type of app they explicitly mentioned (menu, calculator, timer, etc.)
+- Style it visually similar to X (colors, layout, design patterns)
+- NOT create a clone of X
 
-                modified_content = modified_content.replace(
-                    "}\n            }",
-                    """}\n            }\n            .onDelete(perform: deleteTodos)"""
-                )
+For example:
+- "menu app with Uber Eats theme" = Restaurant menu app that looks like Uber Eats UI
+- "calculator with Apple style" = Calculator app with Apple's design aesthetics
+- "timer like Spotify" = Timer app with Spotify's visual style
+"""
 
-                # Add delete function if not present
-                if "func deleteTodos" not in modified_content:
-                    modified_content = modified_content.replace(
-                        "struct ContentView_Previews",
-                        """    func deleteTodos(at offsets: IndexSet) {
-        todos.remove(atOffsets: offsets)
-    }
-}
+        prompt = f"""Create a UNIQUE iOS app based on this request:
 
-struct ContentView_Previews"""
-                    )
+USER REQUEST: "{description}"
+{"APP NAME: " + app_name if app_name else "APP NAME: Extract from the request or create a creative name"}
+{clarification}
 
-                modified_files.append({
-                    "path": "Sources/ContentView.swift",
-                    "content": modified_content
-                })
-                features_added.append("Delete functionality for todo items")
+UNDERSTANDING THE REQUEST:
+1. First, identify the CORE APP TYPE the user wants:
+   - Is it explicitly mentioned? (menu, calculator, timer, todo, etc.)
+   - What is the primary functionality they need?
 
-        # Return the existing code if no modifications were made
-        if not modified_files:
-            for filename, content in existing_code.items():
-                modified_files.append({
-                    "path": f"Sources/{filename}",
-                    "content": content
-                })
+2. Then identify any STYLE/THEME references:
+   - Are they asking for a specific visual style?
+   - Do they reference another app for design inspiration?
 
-        return {
-            "files": modified_files,
-            "features": features_added,
-            "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
-            "app_name": app_name
-        }
+3. Be careful not to confuse:
+   - "X theme/style" = visual design like X
+   - "app like X" = functionality similar to X
+   - "X app" = the type of app is X
 
-    def _modify_ui(self, app_name: str, existing_code: Dict, request: str) -> Dict:
-        """Modify the UI of the app"""
-        modified_files = []
-        features_added = []
+UNIQUENESS REQUIREMENTS:
+- Unique Seed: {unique_seed}
+- Time Context: {time_hint}
+- Design Inspiration: {design_inspiration}
+- Color Mood: {color_mood}
+- Random Factor: {random.randint(1, 1000)}
 
-        # Example: Changing to dark mode
-        if "dark" in request.lower() and "ContentView.swift" in existing_code:
-            content_view = existing_code["ContentView.swift"]
+CRITICAL TECHNICAL REQUIREMENTS:
+1. ALWAYS import SwiftUI at the top of EVERY Swift file
+2. Ensure @main struct conforms to App protocol
+3. Include all necessary imports (Foundation, Combine, etc.)
+4. Use proper Swift syntax and iOS 16+ features
+5. Make sure ALL code compiles without errors
 
-            # Add dark mode modifier
-            if ".preferredColorScheme(.dark)" not in content_view:
-                modified_content = content_view.replace(
-                    "struct ContentView_Previews",
-                    """    }\n    .preferredColorScheme(.dark)
-}
+CREATIVE REQUIREMENTS:
+1. Generate a COMPLETELY UNIQUE implementation
+2. Add unexpected delightful features
+3. Use smooth animations and transitions
+4. Make it feel premium and polished
+5. Include at least ONE surprising feature
 
-struct ContentView_Previews"""
-                )
+Return a JSON object with this EXACT structure:
+{{
+    "files": [
+        {{
+            "path": "Sources/AppMain.swift",
+            "content": "import SwiftUI\n\n@main\nstruct AppNameApp: App {{\n    var body: some Scene {{\n        WindowGroup {{\n            ContentView()\n        }}\n    }}\n}}"
+        }},
+        {{
+            "path": "Sources/ContentView.swift",
+            "content": "import SwiftUI\n\n// Your unique implementation here"
+        }},
+        // Add more files if needed
+    ],
+    "features": [
+        "Specific feature 1 that you implemented",
+        "Specific feature 2 that you implemented"
+    ],
+    "bundle_id": "com.swiftgen.{{app_name_lowercase}}",
+    "app_name": "{{AppName}}",
+    "unique_aspects": "What makes this implementation special",
+    "design_notes": "Design decisions you made"
+}}
 
-                modified_files.append({
-                    "path": "Sources/ContentView.swift",
-                    "content": modified_content
-                })
-                features_added.append("Dark mode theme")
+Remember:
+- ALWAYS import SwiftUI in EVERY Swift file
+- Two users asking for the same type of app should get COMPLETELY DIFFERENT implementations
+- Understand what TYPE of app they want vs what STYLE they want"""
 
-        # Return files
-        if not modified_files:
-            for filename, content in existing_code.items():
-                modified_files.append({
-                    "path": f"Sources/{filename}",
-                    "content": content
-                })
+        return prompt
 
-        return {
-            "files": modified_files,
-            "features": features_added,
-            "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
-            "app_name": app_name
-        }
+    def _create_intelligent_modification_prompt(self, app_name: str, original_description: str,
+                                              modification_request: str, existing_files: List[Dict]) -> str:
+        """Create a prompt for intelligent modifications"""
 
-    def _fix_bug(self, app_name: str, existing_code: Dict, request: str) -> Dict:
-        """Fix bugs in the app"""
-        # This would analyze the request and fix common issues
-        # For now, just return the existing code
+        # Prepare existing code
+        code_context = "\n\n".join([
+            f"File: {file['path']}\n```swift\n{file['content']}\n```"
+            for file in existing_files
+        ])
 
-        modified_files = []
-        for filename, content in existing_code.items():
-            modified_files.append({
-                "path": f"Sources/{filename}",
-                "content": content
-            })
+        # Generate modification context
+        mod_seed = hashlib.md5(f"{modification_request}{datetime.now().isoformat()}".encode()).hexdigest()[:8]
 
-        return {
-            "files": modified_files,
-            "features": ["Bug fixes and improvements"],
-            "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
-            "app_name": app_name
-        }
+        prompt = f"""You need to modify an existing iOS app based on a user request.
 
-    def _smart_modify(self, app_name: str, existing_code: Dict, request: str) -> Dict:
-        """Smart modification based on request analysis"""
-        # This is where more sophisticated modifications would happen
-        # For now, we'll just return the existing code
+CURRENT APP:
+- App Name: {app_name}
+- Original Purpose: {original_description}
 
-        modified_files = []
-        for filename, content in existing_code.items():
-            modified_files.append({
-                "path": f"Sources/{filename}",
-                "content": content
-            })
+USER'S MODIFICATION REQUEST: "{modification_request}"
 
-        return {
-            "files": modified_files,
-            "features": ["Applied requested modifications"],
-            "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
-            "app_name": app_name
-        }
+EXISTING CODE:
+{code_context}
 
-    def _generate_default_app_main(self, app_name: str) -> str:
-        """Generate default App main file"""
-        # Clean the app name to be a valid Swift identifier
-        clean_name = ''.join(c for c in app_name if c.isalnum())
-        if not clean_name:
-            clean_name = "MyApp"
-        if clean_name[0].isdigit():
-            clean_name = "App" + clean_name
+MODIFICATION REQUIREMENTS:
+1. UNDERSTAND the modification request:
+   - What exactly does the user want to change?
+   - Is it visual? Functional? Bug fix? New feature?
+   - What's the intent behind the request?
 
-        return f"""import SwiftUI
+2. MAKE REAL CHANGES:
+   - Don't just return the same code
+   - Actually implement what the user asked for
+   - If they say "add dark mode", add real dark mode support
+   - If they say "make buttons bigger", make them bigger
+   - If they say "add animation", add actual animations
 
-@main
-struct {clean_name}App: App {{
-    var body: some Scene {{
-        WindowGroup {{
-            ContentView()
+3. PRESERVE & ENHANCE:
+   - Keep all existing functionality working
+   - Maintain the app's unique character
+   - Add smooth transitions for any UI changes
+   - Improve code quality where possible
+
+4. BE CREATIVE:
+   - Modification Seed: {mod_seed}
+   - Don't just do the minimum - exceed expectations
+   - Add related improvements that make sense
+
+CRITICAL: Return a properly formatted JSON object with this EXACT structure:
+{{
+    "files": [
+        {{
+            "path": "Sources/AppMain.swift",
+            "content": "// The complete modified AppMain.swift code"
+        }},
+        {{
+            "path": "Sources/ContentView.swift",
+            "content": "// The complete modified ContentView.swift code"
         }}
-    }}
+        // Include ALL files, both modified and unmodified
+        // Each file MUST have both "path" and "content" keys
+    ],
+    "features": [
+        "Specific change 1 that was made",
+        "Specific change 2 that was made"
+    ],
+    "bundle_id": "{f"com.swiftgen.{app_name.lower().replace(' ', '')}"}",
+    "app_name": "{app_name}",
+    "modification_summary": "Clear explanation of what was changed and why"
+}}
+
+IMPORTANT FORMATTING RULES:
+- Each file object MUST have "path" and "content" keys
+- The "path" must match the original file paths exactly
+- Include the COMPLETE file content, not snippets
+- Return ALL files from the app, whether modified or not
+- Ensure the JSON is properly formatted without syntax errors
+
+The user wants their app modified. Make sure you actually change the code based on their request!"""
+
+        return prompt
+
+    async def _call_claude_api(self, prompt: str) -> Optional[Dict]:
+        """Make API call to Claude with improved error handling"""
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                response = await client.post(
+                    self.api_url,
+                    headers=self.headers,
+                    json={
+                        "model": self.model,
+                        "system": self.system_prompt,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        "max_tokens": 4096,
+                        "temperature": 0.8  # Higher temperature for more creativity
+                    }
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result['content'][0]['text']
+
+                    # Extract and parse JSON from response
+                    parsed = self._extract_json_from_response(content)
+
+                    if parsed and "files" in parsed and len(parsed["files"]) > 0:
+                        return parsed
+                    else:
+                        print("Invalid response structure from Claude")
+                        return None
+
+                else:
+                    print(f"Claude API error: {response.status_code}")
+                    print(f"Response: {response.text}")
+
+                    # Handle rate limits
+                    if response.status_code == 429:
+                        print("Rate limited. Please wait before trying again.")
+                    elif response.status_code == 401:
+                        print("Invalid API key. Please check your CLAUDE_API_KEY.")
+
+                    return None
+
+            except httpx.TimeoutException:
+                print("Request to Claude timed out. The request might be too complex.")
+                return None
+            except Exception as e:
+                print(f"Error calling Claude API: {str(e)}")
+                return None
+
+    def _extract_json_from_response(self, content: str) -> Optional[Dict]:
+        """Extract and parse JSON from Claude's response, handling various formats"""
+
+        try:
+            # Method 1: Try to parse the entire content as JSON
+            return json.loads(content)
+        except:
+            pass
+
+        try:
+            # Method 2: Look for JSON wrapped in ```json blocks
+            if "```json" in content:
+                json_start = content.find("```json") + 7
+                json_end = content.find("```", json_start)
+                if json_end > json_start:
+                    json_str = content[json_start:json_end].strip()
+                    return json.loads(json_str)
+        except:
+            pass
+
+        try:
+            # Method 3: Find JSON by looking for { and }
+            json_start = content.find('{')
+            json_end = content.rfind('}') + 1
+
+            if json_start >= 0 and json_end > json_start:
+                json_str = content[json_start:json_end]
+                return json.loads(json_str)
+        except:
+            pass
+
+        # Method 4: Try to extract code blocks and construct JSON manually
+        try:
+            return self._construct_json_from_content(content)
+        except Exception as e:
+            print(f"Failed to extract JSON from response: {e}")
+            return None
+
+    def _construct_json_from_content(self, content: str) -> Dict:
+        """Construct JSON from Claude's response when it's not properly formatted"""
+
+        # This handles cases where Claude returns Swift code outside of proper JSON
+        files = []
+
+        # Look for file paths and their content
+        lines = content.split('\n')
+        current_file = None
+        current_content = []
+        in_code_block = False
+
+        for line in lines:
+            # Check for file path indicators
+            if '"path":' in line:
+                # Save previous file if exists
+                if current_file and current_content:
+                    files.append({
+                        "path": current_file,
+                        "content": '\n'.join(current_content).strip()
+                    })
+                    current_content = []
+
+                # Extract file path
+                try:
+                    path_match = re.search(r'"path":\s*"([^"]+)"', line)
+                    if path_match:
+                        current_file = path_match.group(1)
+                except:
+                    pass
+
+            # Check for content start
+            elif '"content":' in line:
+                in_code_block = True
+                # Try to extract content from the same line if it's there
+                try:
+                    content_match = re.search(r'"content":\s*"(.+)"', line)
+                    if content_match:
+                        # Single line content
+                        content_str = content_match.group(1)
+                        # Unescape the content
+                        content_str = content_str.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                        if current_file:
+                            files.append({
+                                "path": current_file,
+                                "content": content_str
+                            })
+                            current_file = None
+                            in_code_block = False
+                except:
+                    pass
+
+            # Collect code content
+            elif in_code_block and current_file:
+                # Look for the end of content
+                if '"}' in line or '"},' in line:
+                    # Extract content before the closing
+                    content_part = line.split('"}')[0].split('"},')[0]
+                    if content_part.strip():
+                        current_content.append(content_part)
+
+                    # Save the file
+                    if current_content:
+                        content_str = '\n'.join(current_content)
+                        # Unescape the content
+                        content_str = content_str.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                        files.append({
+                            "path": current_file,
+                            "content": content_str.strip()
+                        })
+
+                    current_file = None
+                    current_content = []
+                    in_code_block = False
+                else:
+                    current_content.append(line)
+
+        # Handle any remaining file
+        if current_file and current_content:
+            content_str = '\n'.join(current_content)
+            content_str = content_str.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+            files.append({
+                "path": current_file,
+                "content": content_str.strip()
+            })
+
+        # Extract other fields
+        app_name = "MyApp"
+        features = []
+
+        # Try to find app name
+        app_name_match = re.search(r'"app_name":\s*"([^"]+)"', content)
+        if app_name_match:
+            app_name = app_name_match.group(1)
+
+        # Try to find features
+        if '"features"' in content:
+            features_match = re.search(r'"features":\s*\[(.*?)\]', content, re.DOTALL)
+            if features_match:
+                features_str = features_match.group(1)
+                # Extract individual features
+                feature_matches = re.findall(r'"([^"]+)"', features_str)
+                features = feature_matches
+
+        # If we found files, construct a valid response
+        if files:
+            return {
+                "files": files,
+                "features": features if features else ["Generated from Claude response"],
+                "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
+                "app_name": app_name,
+                "unique_aspects": "AI-generated unique implementation"
+            }
+
+        # Last resort: Look for Swift code blocks and create files from them
+        swift_blocks = re.findall(r'```swift(.*?)```', content, re.DOTALL)
+        if swift_blocks:
+            for i, code in enumerate(swift_blocks):
+                # Determine file name based on content
+                if "@main" in code:
+                    files.append({
+                        "path": "Sources/AppMain.swift",
+                        "content": code.strip()
+                    })
+                elif "ContentView" in code:
+                    files.append({
+                        "path": "Sources/ContentView.swift",
+                        "content": code.strip()
+                    })
+                else:
+                    files.append({
+                        "path": f"Sources/File{i}.swift",
+                        "content": code.strip()
+                    })
+
+            if files:
+                return {
+                    "files": files,
+                    "features": ["Generated from Swift code blocks"],
+                    "bundle_id": f"com.swiftgen.app",
+                    "app_name": "Generated App",
+                    "unique_aspects": "AI-generated implementation"
+                }
+
+        raise Exception("Could not extract valid app data from response")
+
+    async def analyze_build_errors(self, errors: List[str], project_files: List[Dict]) -> Dict:
+        """Let Claude analyze and fix build errors"""
+
+        if not self.api_key:
+            raise ValueError("Claude API key required for error analysis")
+
+        error_text = "\n".join(errors)
+        code_context = "\n\n".join([
+            f"File: {file['path']}\n```swift\n{file['content']}\n```"
+            for file in project_files
+        ])
+
+        prompt = f"""Analyze these iOS build errors and provide fixes:
+
+BUILD ERRORS:
+{error_text}
+
+CURRENT CODE:
+{code_context}
+
+Analyze the errors and provide corrected code. Focus on:
+1. Understanding the root cause of each error
+2. Providing minimal, targeted fixes
+3. Ensuring the fixes don't break other functionality
+4. Following Swift best practices
+
+Return a JSON object with corrected files:
+{{
+    "files": [
+        {{
+            "path": "Sources/filename.swift",
+            "content": "// Corrected Swift code"
+        }}
+    ],
+    "fixes_applied": [
+        "Description of each fix"
+    ],
+    "root_causes": [
+        "Root cause analysis"
+    ]
 }}"""
 
-    def _generate_smart_content_view(self, description: str) -> str:
-        """Generate a ContentView based on description keywords"""
-        description_lower = description.lower()
-
-        # Detect type of app from description
-        if "todo" in description_lower or "task" in description_lower:
-            return self._generate_todo_app()
-        elif "calculator" in description_lower or "calc" in description_lower:
-            return self._generate_calculator_app()
-        elif "weather" in description_lower:
-            return self._generate_weather_app()
-        elif "timer" in description_lower or "countdown" in description_lower:
-            return self._generate_timer_app()
-        elif "note" in description_lower or "notes" in description_lower:
-            return self._generate_notes_app()
-        elif "chat" in description_lower or "message" in description_lower:
-            return self._generate_chat_app()
-        else:
-            return self._generate_default_content_view()
-
-    def _generate_calculator_app(self) -> str:
-        """Generate a simple calculator app"""
-        return """import SwiftUI
-
-struct ContentView: View {
-    @State private var display = "0"
-    @State private var currentNumber: Double = 0
-    @State private var previousNumber: Double = 0
-    @State private var operation: String = ""
-
-    let buttons = [
-        ["AC", "+/-", "%", "÷"],
-        ["7", "8", "9", "×"],
-        ["4", "5", "6", "-"],
-        ["1", "2", "3", "+"],
-        ["0", ".", "="]
-    ]
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            VStack(spacing: 12) {
-                Spacer()
-
-                // Display
-                Text(display)
-                    .font(.system(size: 64))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.horizontal)
-
-                // Buttons
-                ForEach(buttons, id: \\.self) { row in
-                    HStack(spacing: 12) {
-                        ForEach(row, id: \\.self) { button in
-                            Button(action: { self.buttonTapped(button) }) {
-                                Text(button)
-                                    .font(.system(size: 32))
-                                    .frame(width: self.buttonWidth(button), height: 80)
-                                    .background(self.buttonColor(button))
-                                    .foregroundColor(.white)
-                                    .cornerRadius(40)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
-            }
-            .padding(.bottom)
-        }
-    }
-
-    func buttonWidth(_ button: String) -> CGFloat {
-        if button == "0" {
-            return (UIScreen.main.bounds.width - 5 * 12) / 4 * 2
-        }
-        return (UIScreen.main.bounds.width - 5 * 12) / 4
-    }
-
-    func buttonColor(_ button: String) -> Color {
-        switch button {
-        case "AC", "+/-", "%":
-            return Color(.lightGray)
-        case "÷", "×", "-", "+", "=":
-            return Color.orange
-        default:
-            return Color(.darkGray)
-        }
-    }
-
-    func buttonTapped(_ button: String) {
-        switch button {
-        case "AC":
-            display = "0"
-            currentNumber = 0
-            previousNumber = 0
-            operation = ""
-        case "0"..."9":
-            if display == "0" {
-                display = button
-            } else {
-                display += button
-            }
-            currentNumber = Double(display) ?? 0
-        case ".":
-            if !display.contains(".") {
-                display += "."
-            }
-        case "+/-":
-            currentNumber = -currentNumber
-            display = String(format: "%g", currentNumber)
-        case "%":
-            currentNumber = currentNumber / 100
-            display = String(format: "%g", currentNumber)
-        case "+", "-", "×", "÷":
-            previousNumber = currentNumber
-            operation = button
-            display = "0"
-        case "=":
-            calculateResult()
-        default:
-            break
-        }
-    }
-
-    func calculateResult() {
-        switch operation {
-        case "+":
-            currentNumber = previousNumber + currentNumber
-        case "-":
-            currentNumber = previousNumber - currentNumber
-        case "×":
-            currentNumber = previousNumber * currentNumber
-        case "÷":
-            if currentNumber != 0 {
-                currentNumber = previousNumber / currentNumber
-            }
-        default:
-            break
-        }
-
-        display = String(format: "%g", currentNumber)
-        operation = ""
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}"""
-
-    def _generate_todo_app(self) -> str:
-        """Generate a simple todo app"""
-        return """import SwiftUI
-
-struct TodoItem: Identifiable {
-    let id = UUID()
-    var title: String
-    var isCompleted: Bool = false
-}
-
-struct ContentView: View {
-    @State private var todos: [TodoItem] = []
-    @State private var newTodoText = ""
-    @State private var showingAddSheet = false
-
-    var body: some View {
-        NavigationView {
-            ZStack {
-                Color(.systemBackground).ignoresSafeArea()
-
-                VStack {
-                    if todos.isEmpty {
-                        VStack(spacing: 20) {
-                            Image(systemName: "checklist")
-                                .font(.system(size: 60))
-                                .foregroundColor(.gray)
-                            Text("No tasks yet")
-                                .font(.title2)
-                                .foregroundColor(.gray)
-                            Text("Tap + to add your first task")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxHeight: .infinity)
-                    } else {
-                        List {
-                            ForEach(todos) { todo in
-                                HStack {
-                                    Button(action: { toggleTodo(todo) }) {
-                                        Image(systemName: todo.isCompleted ? "checkmark.circle.fill" : "circle")
-                                            .foregroundColor(todo.isCompleted ? .green : .gray)
-                                            .font(.title2)
-                                    }
-
-                                    Text(todo.title)
-                                        .strikethrough(todo.isCompleted)
-                                        .foregroundColor(todo.isCompleted ? .gray : .primary)
-
-                                    Spacer()
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .onDelete(perform: deleteTodos)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Tasks")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddSheet = true }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                    }
-                }
-            }
-            .sheet(isPresented: $showingAddSheet) {
-                AddTodoView(todos: $todos, isPresented: $showingAddSheet)
-            }
-        }
-    }
-
-    func toggleTodo(_ todo: TodoItem) {
-        if let index = todos.firstIndex(where: { $0.id == todo.id }) {
-            todos[index].isCompleted.toggle()
-        }
-    }
-
-    func deleteTodos(at offsets: IndexSet) {
-        todos.remove(atOffsets: offsets)
-    }
-}
-
-struct AddTodoView: View {
-    @Binding var todos: [TodoItem]
-    @Binding var isPresented: Bool
-    @State private var todoText = ""
-
-    var body: some View {
-        NavigationView {
-            Form {
-                TextField("Task description", text: $todoText)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            .navigationTitle("New Task")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        isPresented = false
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Add") {
-                        if !todoText.isEmpty {
-                            todos.append(TodoItem(title: todoText))
-                            isPresented = false
-                        }
-                    }
-                    .disabled(todoText.isEmpty)
-                }
-            }
-        }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}"""
-
-    def _generate_weather_app(self) -> str:
-        """Generate a simple weather app UI"""
-        return """import SwiftUI
-
-struct ContentView: View {
-    @State private var city = "San Francisco"
-    @State private var temperature = 72
-    @State private var condition = "Sunny"
-    @State private var humidity = 65
-    @State private var windSpeed = 12
-
-    var body: some View {
-        ZStack {
-            // Background gradient
-            LinearGradient(
-                gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.blue.opacity(0.2)]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 30) {
-                // City name
-                Text(city)
-                    .font(.largeTitle)
-                    .fontWeight(.medium)
-                    .foregroundColor(.white)
-                    .padding(.top, 50)
-
-                // Weather icon and temperature
-                VStack(spacing: 10) {
-                    Image(systemName: weatherIcon(for: condition))
-                        .font(.system(size: 100))
-                        .foregroundColor(.white)
-                        .symbolRenderingMode(.hierarchical)
-
-                    Text("\\(temperature)°")
-                        .font(.system(size: 80, weight: .thin))
-                        .foregroundColor(.white)
-
-                    Text(condition)
-                        .font(.title2)
-                        .foregroundColor(.white.opacity(0.8))
-                }
-
-                // Weather details
-                HStack(spacing: 50) {
-                    WeatherDetailView(
-                        icon: "wind",
-                        value: "\\(windSpeed) mph",
-                        label: "Wind"
-                    )
-
-                    WeatherDetailView(
-                        icon: "humidity",
-                        value: "\\(humidity)%",
-                        label: "Humidity"
-                    )
-
-                    WeatherDetailView(
-                        icon: "umbrella",
-                        value: "0%",
-                        label: "Rain"
-                    )
-                }
-                .padding(.horizontal, 30)
-
-                Spacer()
-
-                // Refresh button
-                Button(action: refreshWeather) {
-                    HStack {
-                        Image(systemName: "arrow.clockwise")
-                        Text("Refresh")
-                    }
-                    .padding(.horizontal, 30)
-                    .padding(.vertical, 15)
-                    .background(Color.white.opacity(0.2))
-                    .cornerRadius(25)
-                    .foregroundColor(.white)
-                }
-                .padding(.bottom, 40)
-            }
-        }
-    }
-
-    func weatherIcon(for condition: String) -> String {
-        switch condition.lowercased() {
-        case "sunny", "clear":
-            return "sun.max.fill"
-        case "cloudy":
-            return "cloud.fill"
-        case "rainy", "rain":
-            return "cloud.rain.fill"
-        case "snowy", "snow":
-            return "cloud.snow.fill"
-        case "stormy":
-            return "cloud.bolt.rain.fill"
-        default:
-            return "sun.max.fill"
-        }
-    }
-
-    func refreshWeather() {
-        // Simulate weather refresh
-        let conditions = ["Sunny", "Cloudy", "Rainy", "Snowy"]
-        condition = conditions.randomElement() ?? "Sunny"
-        temperature = Int.random(in: 30...95)
-        humidity = Int.random(in: 30...90)
-        windSpeed = Int.random(in: 5...25)
-    }
-}
-
-struct WeatherDetailView: View {
-    let icon: String
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(.white)
-            Text(value)
-                .font(.headline)
-                .foregroundColor(.white)
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.white.opacity(0.8))
-        }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}"""
-
-    def _generate_timer_app(self) -> str:
-        """Generate a simple timer app"""
-        return """import SwiftUI
-
-struct ContentView: View {
-    @State private var timeRemaining = 300 // 5 minutes in seconds
-    @State private var isActive = false
-    @State private var initialTime = 300
-    @State private var showingTimePicker = false
-
-    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    var body: some View {
-        ZStack {
-            Color(.systemBackground).ignoresSafeArea()
-
-            VStack(spacing: 50) {
-                Text("Timer")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-
-                // Timer display
-                ZStack {
-                    Circle()
-                        .stroke(lineWidth: 20)
-                        .opacity(0.3)
-                        .foregroundColor(.blue)
-                        .frame(width: 280, height: 280)
-
-                    Circle()
-                        .trim(from: 0, to: CGFloat(timeRemaining) / CGFloat(initialTime))
-                        .stroke(style: StrokeStyle(lineWidth: 20, lineCap: .round))
-                        .foregroundColor(.blue)
-                        .frame(width: 280, height: 280)
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear, value: timeRemaining)
-
-                    VStack {
-                        Text(timeString(from: timeRemaining))
-                            .font(.system(size: 60, weight: .medium, design: .rounded))
-                            .onTapGesture {
-                                if !isActive {
-                                    showingTimePicker = true
-                                }
-                            }
-
-                        Text("Tap to edit")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .opacity(isActive ? 0 : 1)
-                    }
-                }
-
-                // Control buttons
-                HStack(spacing: 50) {
-                    // Play/Pause button
-                    Button(action: { isActive.toggle() }) {
-                        Image(systemName: isActive ? "pause.fill" : "play.fill")
-                            .font(.title)
-                            .foregroundColor(.white)
-                            .frame(width: 80, height: 80)
-                            .background(Color.blue)
-                            .clipShape(Circle())
-                    }
-
-                    // Reset button
-                    Button(action: resetTimer) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.title)
-                            .foregroundColor(.white)
-                            .frame(width: 80, height: 80)
-                            .background(Color.gray)
-                            .clipShape(Circle())
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(.top, 60)
-        }
-        .onReceive(timer) { _ in
-            if isActive && timeRemaining > 0 {
-                timeRemaining -= 1
-            } else if timeRemaining == 0 {
-                isActive = false
-                // Could add notification here
-            }
-        }
-        .sheet(isPresented: $showingTimePicker) {
-            TimePickerView(timeRemaining: $timeRemaining, initialTime: $initialTime)
-        }
-    }
-
-    func timeString(from seconds: Int) -> String {
-        let hours = seconds / 3600
-        let minutes = (seconds % 3600) / 60
-        let seconds = seconds % 60
-
-        if hours > 0 {
-            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%02d:%02d", minutes, seconds)
-        }
-    }
-
-    func resetTimer() {
-        isActive = false
-        timeRemaining = initialTime
-    }
-}
-
-struct TimePickerView: View {
-    @Binding var timeRemaining: Int
-    @Binding var initialTime: Int
-    @State private var hours = 0
-    @State private var minutes = 5
-    @State private var seconds = 0
-    @Environment(\\.presentationMode) var presentationMode
-
-    var body: some View {
-        NavigationView {
-            VStack {
-                HStack {
-                    Picker("Hours", selection: $hours) {
-                        ForEach(0..<24) { hour in
-                            Text("\\(hour) h").tag(hour)
-                        }
-                    }
-                    .pickerStyle(WheelPickerStyle())
-
-                    Picker("Minutes", selection: $minutes) {
-                        ForEach(0..<60) { minute in
-                            Text("\\(minute) m").tag(minute)
-                        }
-                    }
-                    .pickerStyle(WheelPickerStyle())
-
-                    Picker("Seconds", selection: $seconds) {
-                        ForEach(0..<60) { second in
-                            Text("\\(second) s").tag(second)
-                        }
-                    }
-                    .pickerStyle(WheelPickerStyle())
-                }
-                .padding()
-            }
-            .navigationTitle("Set Timer")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Set") {
-                        let totalSeconds = hours * 3600 + minutes * 60 + seconds
-                        if totalSeconds > 0 {
-                            timeRemaining = totalSeconds
-                            initialTime = totalSeconds
-                        }
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            }
-        }
-        .onAppear {
-            hours = timeRemaining / 3600
-            minutes = (timeRemaining % 3600) / 60
-            seconds = timeRemaining % 60
-        }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}"""
-
-    def _generate_notes_app(self) -> str:
-        """Generate a simple notes app"""
-        return """import SwiftUI
-
-struct Note: Identifiable {
-    let id = UUID()
-    var title: String
-    var content: String
-    var date: Date = Date()
-}
-
-struct ContentView: View {
-    @State private var notes: [Note] = []
-    @State private var showingAddNote = false
-    @State private var searchText = ""
-
-    var filteredNotes: [Note] {
-        if searchText.isEmpty {
-            return notes
-        } else {
-            return notes.filter {
-                $0.title.localizedCaseInsensitiveContains(searchText) ||
-                $0.content.localizedCaseInsensitiveContains(searchText)
-            }
-        }
-    }
-
-    var body: some View {
-        NavigationView {
-            ZStack {
-                Color(.systemBackground).ignoresSafeArea()
-
-                if notes.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "note.text")
-                            .font(.system(size: 60))
-                            .foregroundColor(.gray)
-                        Text("No notes yet")
-                            .font(.title2)
-                            .foregroundColor(.gray)
-                        Text("Tap + to create your first note")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                } else {
-                    List {
-                        ForEach(filteredNotes) { note in
-                            NavigationLink(destination: NoteDetailView(note: note, notes: $notes)) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(note.title)
-                                        .font(.headline)
-                                        .lineLimit(1)
-                                    Text(note.content)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(2)
-                                    Text(note.date, style: .date)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-                        .onDelete(perform: deleteNotes)
-                    }
-                }
-            }
-            .searchable(text: $searchText, prompt: "Search notes")
-            .navigationTitle("Notes")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddNote = true }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                    }
-                }
-            }
-            .sheet(isPresented: $showingAddNote) {
-                AddNoteView(notes: $notes)
-            }
-        }
-    }
-
-    func deleteNotes(at offsets: IndexSet) {
-        notes.remove(atOffsets: offsets)
-    }
-}
-
-struct AddNoteView: View {
-    @Binding var notes: [Note]
-    @State private var title = ""
-    @State private var content = ""
-    @Environment(\\.presentationMode) var presentationMode
-
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Title") {
-                    TextField("Note title", text: $title)
-                }
-
-                Section("Content") {
-                    TextEditor(text: $content)
-                        .frame(minHeight: 200)
-                }
-            }
-            .navigationTitle("New Note")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        let newNote = Note(
-                            title: title.isEmpty ? "Untitled" : title,
-                            content: content
-                        )
-                        notes.append(newNote)
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                    .disabled(content.isEmpty)
-                }
-            }
-        }
-    }
-}
-
-struct NoteDetailView: View {
-    let note: Note
-    @Binding var notes: [Note]
-    @State private var editedTitle: String
-    @State private var editedContent: String
-    @Environment(\\.presentationMode) var presentationMode
-
-    init(note: Note, notes: Binding<[Note]>) {
-        self.note = note
-        self._notes = notes
-        self._editedTitle = State(initialValue: note.title)
-        self._editedContent = State(initialValue: note.content)
-    }
-
-    var body: some View {
-        Form {
-            Section("Title") {
-                TextField("Note title", text: $editedTitle)
-            }
-
-            Section("Content") {
-                TextEditor(text: $editedContent)
-                    .frame(minHeight: 300)
-            }
-
-            Section {
-                HStack {
-                    Text("Created")
-                    Spacer()
-                    Text(note.date, style: .date)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .navigationTitle("Edit Note")
-        .navigationBarTitleDisplayMode(.inline)
-        .onDisappear {
-            if let index = notes.firstIndex(where: { $0.id == note.id }) {
-                notes[index].title = editedTitle
-                notes[index].content = editedContent
-            }
-        }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}"""
-
-    def _generate_chat_app(self) -> str:
-        """Generate a simple chat UI app"""
-        return """import SwiftUI
-
-struct Message: Identifiable {
-    let id = UUID()
-    let text: String
-    let isUser: Bool
-    let timestamp: Date = Date()
-}
-
-struct ContentView: View {
-    @State private var messages: [Message] = [
-        Message(text: "Hello! Welcome to SwiftChat.", isUser: false),
-        Message(text: "This is a demo chat interface.", isUser: false)
-    ]
-    @State private var newMessage = ""
-
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                // Messages list
-                ScrollViewReader { scrollView in
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(messages) { message in
-                                MessageBubble(message: message)
-                                    .id(message.id)
-                            }
-                        }
-                        .padding()
-                    }
-                    .onChange(of: messages.count) { _ in
-                        withAnimation {
-                            scrollView.scrollTo(messages.last?.id, anchor: .bottom)
-                        }
-                    }
-                }
-
-                // Input area
-                HStack(spacing: 12) {
-                    TextField("Type a message", text: $newMessage)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onSubmit {
-                            sendMessage()
-                        }
-
-                    Button(action: sendMessage) {
-                        Image(systemName: "paperplane.fill")
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.blue)
-                            .clipShape(Circle())
-                    }
-                    .disabled(newMessage.isEmpty)
-                }
-                .padding()
-                .background(Color(.systemGray6))
-            }
-            .navigationTitle("Chat")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-
-    func sendMessage() {
-        guard !newMessage.isEmpty else { return }
-
-        // Add user message
-        messages.append(Message(text: newMessage, isUser: true))
-
-        // Simulate response
-        let responseText = "You said: \\(newMessage)"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            messages.append(Message(text: responseText, isUser: false))
-        }
-
-        newMessage = ""
-    }
-}
-
-struct MessageBubble: View {
-    let message: Message
-
-    var body: some View {
-        HStack {
-            if message.isUser { Spacer() }
-
-            VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.text)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(message.isUser ? Color.blue : Color(.systemGray5))
-                    .foregroundColor(message.isUser ? .white : .primary)
-                    .cornerRadius(20)
-
-                Text(message.timestamp, style: .time)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.7, alignment: message.isUser ? .trailing : .leading)
-
-            if !message.isUser { Spacer() }
-        }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}"""
-
-    def _generate_default_content_view(self) -> str:
-        """Generate default ContentView"""
-        return """import SwiftUI
-
-struct ContentView: View {
-    @State private var message = "Welcome to SwiftGen!"
-    @State private var count = 0
-    @State private var showingAlert = false
-
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 30) {
-                Text(message)
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
-                    .padding()
-
-                Text("You've tapped \\(count) times")
-                    .font(.title2)
-                    .foregroundColor(.secondary)
-
-                Button(action: {
-                    count += 1
-                    if count % 10 == 0 {
-                        showingAlert = true
-                    }
-                }) {
-                    Label("Tap Me!", systemImage: "hand.tap.fill")
-                        .font(.title2)
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(width: 200, height: 60)
-                        .background(LinearGradient(
-                            gradient: Gradient(colors: [.blue, .purple]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ))
-                        .cornerRadius(15)
-                }
-
-                Spacer()
-            }
-            .navigationTitle("SwiftGen App")
-            .alert("Milestone!", isPresented: $showingAlert) {
-                Button("OK") { }
-            } message: {
-                Text("You've reached \\(count) taps!")
-            }
-        }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}"""
-
-    def _generate_smart_default_app(self, app_name: str, description: str) -> Dict:
-        """Generate a smart default app based on description"""
-        return {
-            "files": [
-                {
-                    "path": "Sources/AppMain.swift",
-                    "content": self._generate_default_app_main(app_name)
-                },
-                {
-                    "path": "Sources/ContentView.swift",
-                    "content": self._generate_smart_content_view(description)
-                }
-            ],
-            "dependencies": [],
-            "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
-            "app_name": app_name
-        }
+        response = await self._call_claude_api(prompt)
+        return response if response else {"files": project_files, "fixes_applied": ["Unable to analyze errors"]}
