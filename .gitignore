@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+workspaces/*
+!workspaces/.gitkeep
+build_logs/
+*.log
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+*.app
+build/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
