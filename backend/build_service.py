@@ -32,8 +32,49 @@ class BuildService:
             self.claude_service = None
             self.has_ai_recovery = False
 
+        # Initialize robust error recovery system with ALL LLMs
+        self._init_error_recovery()
+
         self.status_callback = None
         self.max_retry_attempts = 3
+
+    def _init_error_recovery(self):
+        """Initialize the robust multi-model error recovery system with all available LLMs"""
+        try:
+            # Import the new robust recovery system
+            from robust_error_recovery_system import create_intelligent_recovery_system
+
+            # Get API keys from environment
+            openai_key = os.getenv("OPENAI_API_KEY")
+            xai_key = os.getenv("XAI_API_KEY")
+
+            # Log which services are available
+            available_services = []
+            if self.claude_service:
+                available_services.append("Claude")
+            if openai_key:
+                available_services.append("GPT-4")
+            if xai_key:
+                available_services.append("xAI/Grok")
+
+            # Create the recovery system with all available LLMs
+            self.error_recovery_system = create_intelligent_recovery_system(
+                claude_service=self.claude_service,
+                openai_key=openai_key,
+                xai_key=xai_key
+            )
+
+            if available_services:
+                print(f"✓ Robust multi-model error recovery system initialized with: {', '.join(available_services)}")
+            else:
+                print("⚠️  No AI services available for error recovery")
+
+        except ImportError:
+            print("Warning: Robust error recovery system not available")
+            self.error_recovery_system = None
+        except Exception as e:
+            print(f"Error initializing recovery system: {e}")
+            self.error_recovery_system = None
 
     def set_status_callback(self, callback):
         """Set callback for status updates"""
@@ -52,6 +93,29 @@ class BuildService:
             project_path = os.path.abspath(os.path.join(self.backend_dir, project_path))
 
         build_log_path = os.path.join(self.build_logs_dir, f"{project_id}_build.log")
+
+        # CRITICAL: Verify source files exist before building
+        sources_dir = os.path.join(project_path, "Sources")
+        if os.path.exists(sources_dir):
+            swift_files = [f for f in os.listdir(sources_dir) if f.endswith('.swift')]
+            print(f"[BUILD] Found {len(swift_files)} Swift files in Sources: {swift_files}")
+
+            if not swift_files:
+                return BuildResult(
+                    success=False,
+                    errors=["No Swift source files found in Sources directory"],
+                    warnings=[],
+                    build_time=0,
+                    log_path=build_log_path
+                )
+        else:
+            return BuildResult(
+                success=False,
+                errors=["Sources directory not found"],
+                warnings=[],
+                build_time=0,
+                log_path=build_log_path
+            )
 
         # Generate Xcode project first
         await self._update_status("Generating Xcode project...")
@@ -94,7 +158,7 @@ class BuildService:
                 )
             else:
                 # Build failed - attempt intelligent recovery
-                if attempt < self.max_retry_attempts - 1 and self.has_ai_recovery:
+                if attempt < self.max_retry_attempts - 1:
                     await self._update_status("Build failed. Analyzing errors and applying AI fixes...")
 
                     fixed = await self._intelligent_error_recovery(
@@ -127,67 +191,66 @@ class BuildService:
         )
 
     async def _intelligent_error_recovery(self, project_path: str, project_id: str,
-                                        errors: List[str], build_output: str) -> bool:
-        """Use AI to intelligently fix build errors with multi-stage recovery"""
+                                          errors: List[str], build_output: str) -> bool:
+        """Use the robust multi-model error recovery system"""
 
-        if not self.claude_service:
-            return False
+        # First try the new robust system if available
+        if self.error_recovery_system:
+            try:
+                # Get all Swift files
+                swift_files = []
+                sources_dir = os.path.join(project_path, "Sources")
 
-        try:
-            # Import the intelligent recovery system
-            from intelligent_error_recovery import IntelligentErrorRecovery
+                if os.path.exists(sources_dir):
+                    for file in os.listdir(sources_dir):
+                        if file.endswith('.swift'):
+                            file_path = os.path.join(sources_dir, file)
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                swift_files.append({
+                                    "path": f"Sources/{file}",
+                                    "content": content
+                                })
+                            except Exception as e:
+                                print(f"Error reading {file}: {e}")
 
-            # Initialize recovery system if not already done
-            if not hasattr(self, 'error_recovery_system'):
-                self.error_recovery_system = IntelligentErrorRecovery(self.claude_service)
+                if not swift_files:
+                    print("No Swift files found for recovery")
+                    return False
 
-            # Get all Swift files
-            swift_files = []
-            sources_dir = os.path.join(project_path, "Sources")
+                # Use the robust recovery system
+                await self._update_status("Analyzing build errors with multi-model system...")
+                fixed, modified_files = await self.error_recovery_system.recover_from_errors(
+                    errors, swift_files, project_path
+                )
 
-            if os.path.exists(sources_dir):
-                for file in os.listdir(sources_dir):
-                    if file.endswith('.swift'):
-                        file_path = os.path.join(sources_dir, file)
-                        with open(file_path, 'r') as f:
-                            content = f.read()
-                        swift_files.append({
-                            "path": f"Sources/{file}",
-                            "content": content
-                        })
+                if fixed:
+                    # Apply the fixes
+                    await self._update_status("Applying intelligent fixes...")
+                    for file_info in modified_files:
+                        file_path = os.path.join(project_path, file_info["path"])
+                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-            # Use multi-stage recovery
-            await self._update_status("Analyzing build errors...")
-            fixed, modified_files = await self.error_recovery_system.recover_from_errors(
-                errors, swift_files, project_path
-            )
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(file_info["content"])
 
-            if fixed:
-                # Apply the fixes
-                await self._update_status("Applying automated fixes...")
-                for file_info in modified_files:
-                    file_path = os.path.join(project_path, file_info["path"])
-                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                    return True
 
-                    with open(file_path, 'w') as f:
-                        f.write(file_info["content"])
+            except Exception as e:
+                print(f"Error in robust recovery system: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # Fall back to original Claude recovery
 
-                return True
-            else:
-                # Fallback to original Claude-based recovery
-                await self._update_status("Attempting advanced AI recovery...")
-                return await self._original_claude_recovery(project_path, project_id, errors, build_output)
-
-        except ImportError:
-            # If intelligent recovery not available, use original method
-            print("Intelligent recovery system not available, using standard recovery")
+        # Fallback to original Claude-based recovery
+        if self.claude_service:
             return await self._original_claude_recovery(project_path, project_id, errors, build_output)
-        except Exception as e:
-            print(f"Error in intelligent recovery: {str(e)}")
-            return False
+
+        return False
 
     async def _original_claude_recovery(self, project_path: str, project_id: str,
-                                      errors: List[str], build_output: str) -> bool:
+                                        errors: List[str], build_output: str) -> bool:
         """Original Claude-based recovery as fallback"""
 
         try:
@@ -239,7 +302,7 @@ class BuildService:
             return False
 
     def _create_error_recovery_prompt(self, errors: List[str], swift_files: List[Dict],
-                                     build_output: str) -> str:
+                                      build_output: str) -> str:
         """Create a sophisticated prompt for error recovery"""
 
         # Extract the most relevant part of build output
@@ -346,8 +409,8 @@ Return ONLY a JSON object:
             return None
 
     async def _handle_successful_build(self, project_path: str, project_id: str,
-                                      bundle_id: Optional[str], build_log_path: str,
-                                      build_time: float, output: str) -> BuildResult:
+                                       bundle_id: Optional[str], build_log_path: str,
+                                       build_time: float, output: str) -> BuildResult:
         """Handle successful build and launch simulator"""
 
         warnings = self._parse_warnings(output)
@@ -400,7 +463,7 @@ Return ONLY a JSON object:
             simulator_launched=False
         )
 
-    # Keep all the existing helper methods from your current build_service.py
+    # Keep all the existing helper methods from the original build_service.py
     def _get_bundle_id_from_project(self, project_path: str) -> Optional[str]:
         """Extract bundle ID from project files"""
         project_json_path = os.path.join(project_path, "project.json")
@@ -499,7 +562,7 @@ Return ONLY a JSON object:
         return []
 
     async def _run_xcodebuild(self, project_path: str) -> Tuple[bool, str, List[str]]:
-        """Execute xcodebuild command"""
+        """Execute xcodebuild command with VERBOSE output to diagnose issues"""
 
         xcodeproj = None
         print(f"Looking for .xcodeproj in: {project_path}")
@@ -521,7 +584,7 @@ Return ONLY a JSON object:
         available_simulators = await self._get_available_simulators()
         print(f"Available simulators: {available_simulators}")
 
-        # Build command
+        # Build command with VERBOSE output
         destinations_to_try = []
 
         for sim_name in ["iPhone 16 Pro", "iPhone 16", "iPhone 15", "iPhone 14"]:
@@ -532,6 +595,7 @@ Return ONLY a JSON object:
         destinations_to_try.append("generic/platform=iOS Simulator")
 
         for destination in destinations_to_try:
+            # CRITICAL: Add -verbose flag and ensure we're building the right target
             cmd = [
                 'xcodebuild',
                 '-project', xcodeproj_path,
@@ -543,10 +607,14 @@ Return ONLY a JSON object:
                 'CODE_SIGN_IDENTITY=',
                 'CODE_SIGNING_REQUIRED=NO',
                 'CODE_SIGNING_ALLOWED=NO',
+                'ONLY_ACTIVE_ARCH=NO',  # Build for all architectures
+                'VALID_ARCHS=x86_64 arm64',  # Ensure we build for simulator architectures
+                '-verbose',  # Add verbose output
                 'build'
             ]
 
             print(f"Trying build with destination: {destination}")
+            print(f"Build command: {' '.join(cmd)}")
 
             try:
                 env = os.environ.copy()
@@ -564,8 +632,44 @@ Return ONLY a JSON object:
                 output = stdout.decode()
                 stderr_output = stderr.decode()
 
+                # Check if any Swift files were compiled
+                if "CompileSwift" in output:
+                    print("✓ Swift files were compiled")
+                else:
+                    print("⚠️ WARNING: No Swift compilation detected in build output")
+
+                # Check for linker output
+                if "Ld " in output or "Link " in output:
+                    print("✓ Linker was invoked")
+                else:
+                    print("⚠️ WARNING: No linking detected in build output")
+
                 if process.returncode == 0:
                     print(f"Build succeeded with destination: {destination}")
+
+                    # Verify the app bundle was created correctly
+                    app_path = self._get_app_path(project_path)
+                    if app_path:
+                        print(f"App bundle found at: {app_path}")
+
+                        # Check contents
+                        app_contents = os.listdir(app_path)
+                        print(f"App bundle contents: {app_contents}")
+
+                        # Look for executable
+                        app_name = os.path.basename(app_path).replace('.app', '')
+                        exec_path = os.path.join(app_path, app_name)
+                        if os.path.exists(exec_path):
+                            print(f"✓ Executable found: {exec_path}")
+                        else:
+                            print(f"✗ CRITICAL: Executable NOT found at expected path: {exec_path}")
+
+                            # Try to find any executable
+                            for item in app_contents:
+                                item_path = os.path.join(app_path, item)
+                                if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
+                                    print(f"  Found executable: {item}")
+
                     return True, output, []
 
                 # Parse errors
@@ -581,8 +685,8 @@ Return ONLY a JSON object:
                 print(f"Error with destination {destination}: {str(e)}")
                 continue
 
-        # Try minimal build as last resort
-        print("Trying minimal build...")
+        # Try minimal build as last resort with more specific settings
+        print("Trying minimal build with explicit settings...")
 
         cmd = [
             'xcodebuild',
@@ -591,9 +695,14 @@ Return ONLY a JSON object:
             '-sdk', 'iphonesimulator',
             '-configuration', 'Debug',
             '-derivedDataPath', derived_data_path,
+            'ONLY_ACTIVE_ARCH=NO',
+            'VALID_ARCHS=x86_64 arm64',
             'CODE_SIGN_IDENTITY=',
             'CODE_SIGNING_REQUIRED=NO',
-            'build'
+            'EXCLUDED_ARCHS=',  # Don't exclude any architectures
+            '-verbose',
+            'clean',  # Clean first
+            'build'   # Then build
         ]
 
         try:
@@ -610,6 +719,11 @@ Return ONLY a JSON object:
                 return True, stdout.decode(), []
             else:
                 errors = self._parse_errors(stderr.decode() + stdout.decode())
+
+                # If no specific errors found, add a generic one
+                if not errors:
+                    errors = ["Build failed but no specific errors were captured. Check build output."]
+
                 return False, stdout.decode(), errors
 
         except Exception as e:
@@ -625,8 +739,8 @@ Return ONLY a JSON object:
 
             # Look for Swift compilation errors specifically
             if ('error:' in line and '.swift' in line) or \
-               ('** BUILD FAILED **' in line) or \
-               ('fatal error:' in line):
+                    ('** BUILD FAILED **' in line) or \
+                    ('fatal error:' in line):
 
                 # Don't duplicate BUILD FAILED
                 if '** BUILD FAILED **' in line and errors:

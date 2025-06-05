@@ -22,77 +22,186 @@ class ClaudeService:
             "content-type": "application/json"
         }
 
-        # System prompt that makes Claude understand its role
-        self.system_prompt = """You are SwiftGen AI, the world's most creative iOS app developer. You have deep expertise in:
-- Swift 5.9 and SwiftUI
-- Creating UNIQUE, beautiful iOS apps that stand out
-- Understanding user intent perfectly
-- Apple's Human Interface Guidelines
-- Modern app design trends and animations
+        self.system_prompt = """You are SwiftGen AI, an expert iOS developer. Create production-ready SwiftUI apps.
 
-Your goal is to create iOS apps that are:
-1. EXACTLY what the user asked for (not generic templates)
-2. UNIQUE - even if two users ask for "timer app", they should get completely different implementations
-3. Production-ready with proper error handling
-4. Visually stunning with thoughtful animations
-5. Following iOS best practices
+CRITICAL RULES - FOLLOW EXACTLY:
+1. Use @Environment(\.dismiss) NOT @Environment(\.presentationMode) for iOS 15+
+2. ALWAYS use double quotes " for strings, NEVER single quotes '
+3. For dismiss functionality use: dismiss() NOT presentationMode.wrappedValue.dismiss()
+4. Never use double double-quotes like "" at the start/end of strings
+5. Import SwiftUI at the top of every file
+6. Bundle IDs must not contain spaces - only lowercase letters, numbers, and dots
+7. ALWAYS return ONLY valid JSON - no explanatory text before or after the JSON
+8. CRITICAL: Use the EXACT bundle ID provided in the prompt - do NOT use generic IDs
+9. ENSURE all files have actual content - never return empty content strings
 
-You think creatively and never produce cookie-cutter solutions. Each app you create should feel special and crafted with care."""
+MODERN SWIFTUI PATTERNS:
+✅ CORRECT: @Environment(\.dismiss) private var dismiss
+❌ WRONG: @Environment(\.presentationMode) var presentationMode
+
+✅ CORRECT: Button("Back") { dismiss() }
+❌ WRONG: Button("Back") { presentationMode.wrappedValue.dismiss() }
+
+✅ CORRECT: Text("Hello World")
+❌ WRONG: Text('Hello World') or Text(""Hello World"")
+
+CRITICAL: Return ONLY the JSON object. Do NOT include any explanatory text like "Here is the code" or "I've fixed the issue". Start your response with { and end with }."""
+
+    def _create_safe_bundle_id(self, app_name: str) -> str:
+        """Create a safe bundle ID from app name - NO SPACES ALLOWED"""
+        # Remove all non-alphanumeric characters and convert to lowercase
+        safe_name = re.sub(r'[^a-zA-Z0-9]', '', app_name).lower()
+
+        # Ensure it starts with a letter
+        if safe_name and not safe_name[0].isalpha():
+            safe_name = 'app' + safe_name
+
+        # Fallback if empty
+        if not safe_name:
+            safe_name = 'myapp'
+
+        # Ensure reasonable length
+        safe_name = safe_name[:20]
+
+        return f"com.swiftgen.{safe_name}"
+
+    def _ensure_files_have_content(self, response: Dict) -> Dict:
+        """Ensure all files have actual content"""
+        if "files" in response:
+            for file in response["files"]:
+                if not file.get("content") or not file["content"].strip():
+                    # Generate default content based on file path
+                    if "App.swift" in file.get("path", ""):
+                        app_name = response.get("app_name", "MyApp").replace(" ", "")
+                        file["content"] = f"""import SwiftUI
+
+@main
+struct {app_name}App: App {{
+    var body: some Scene {{
+        WindowGroup {{
+            ContentView()
+        }}
+    }}
+}}"""
+                    elif "ContentView.swift" in file.get("path", ""):
+                        file["content"] = """import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Image(systemName: "globe")
+                .imageScale(.large)
+                .foregroundStyle(.tint)
+            Text("Hello, world!")
+        }
+        .padding()
+    }
+}"""
+        return response
 
     async def generate_ios_app(self, description: str, app_name: Optional[str] = None) -> Dict:
         """Generate iOS app using Claude's full intelligence"""
 
-        # Let Claude handle EVERYTHING - app name extraction, understanding, generation
-        if not self.api_key or self.api_key == "YOUR_CLAUDE_API_KEY_HERE":
-            raise ValueError("Claude API key is required. Please set CLAUDE_API_KEY in .env file")
+        if not self.api_key:
+            raise ValueError("Claude API key is required")
 
         try:
-            # Create a prompt that lets Claude shine
-            prompt = self._create_intelligent_generation_prompt(description, app_name)
+            # Generate safe bundle ID
+            safe_bundle_id = self._create_safe_bundle_id(app_name) if app_name else self._create_safe_bundle_id("app")
 
-            # Call Claude API
-            response = await self._call_claude_api(prompt)
+            print(f"[CLAUDE SERVICE] Generating app with bundle ID: {safe_bundle_id}")
 
-            if response and "files" in response:
-                print(f"Claude generated: {response.get('app_name')} with features: {response.get('features', [])}")
-                return response
-            else:
-                raise Exception("Failed to generate app. Please try with a clearer description.")
+            prompt = self._create_intelligent_generation_prompt(description, app_name, safe_bundle_id)
+
+            # Call Claude API with retry
+            max_retries = 3
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    response = await self._call_claude_api(prompt)
+
+                    if response and "files" in response:
+                        # CRITICAL FIX: Ensure files have content
+                        response = self._ensure_files_have_content(response)
+
+                        # CRITICAL FIX: ALWAYS override bundle ID to ensure it's correct
+                        response["bundle_id"] = safe_bundle_id
+
+                        # Let Claude determine the app name from context
+                        actual_app_name = response.get("app_name", app_name or "App")
+
+                        print(f"[CLAUDE SERVICE] Generated response structure:")
+                        print(f"  - App name: {actual_app_name}")
+                        print(f"  - Bundle ID: {safe_bundle_id}")
+                        print(f"  - Number of files: {len(response.get('files', []))}")
+
+                        # Log file details
+                        for i, file in enumerate(response.get("files", [])):
+                            print(f"  - File {i+1}: {file.get('path', 'unknown')} ({len(file.get('content', ''))} chars)")
+
+                        # CRITICAL: Validate the response doesn't have generic bundle ID
+                        if response.get("bundle_id") == "com.swiftgen.myapp" and app_name and app_name.lower() != "myapp":
+                            print(f"WARNING: Claude returned generic bundle ID, overriding with: {safe_bundle_id}")
+                            response["bundle_id"] = safe_bundle_id
+
+                        return response
+
+                except Exception as e:
+                    last_error = str(e)
+                    if attempt < max_retries - 1:
+                        print(f"Attempt {attempt + 1} failed: {str(e)}, retrying...")
+                        await asyncio.sleep(2)
+                        continue
+
+            raise Exception(f"Failed to generate app after {max_retries} attempts. Last error: {last_error}")
 
         except Exception as e:
             print(f"Error in app generation: {str(e)}")
             raise
 
     async def modify_ios_app(self, app_name: str, original_description: str,
-                           modification_request: str, existing_files: List[Dict]) -> Dict:
+                             modification_request: str, existing_files: List[Dict],
+                             existing_bundle_id: Optional[str] = None) -> Dict:
         """Let Claude intelligently modify the app"""
 
         # Handle manual edits
         if isinstance(existing_files, dict) and existing_files.get('manual_edit'):
+            edited_files = existing_files.get('edited_files', [])
+
+            # Use existing bundle ID or create safe one
+            safe_bundle_id = existing_bundle_id or self._create_safe_bundle_id(app_name)
+
             return {
-                "files": existing_files.get('edited_files', []),
+                "files": edited_files,
                 "features": ["Manual code edit applied"],
-                "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
+                "bundle_id": safe_bundle_id,
                 "app_name": app_name
             }
 
-        if not self.api_key or self.api_key == "YOUR_CLAUDE_API_KEY_HERE":
+        if not self.api_key:
             raise ValueError("Claude API key is required for modifications")
 
         try:
-            # Let Claude understand and apply the modifications
+            # Use existing bundle ID or create safe one
+            safe_bundle_id = existing_bundle_id or self._create_safe_bundle_id(app_name)
+
             prompt = self._create_intelligent_modification_prompt(
-                app_name, original_description, modification_request, existing_files
+                app_name, original_description, modification_request, existing_files, safe_bundle_id
             )
 
             response = await self._call_claude_api(prompt)
 
             if response:
+                # Ensure files have content
+                response = self._ensure_files_have_content(response)
+
                 # Ensure the response has the correct structure
-                validated_response = self._validate_modification_response(response, existing_files, app_name)
+                validated_response = self._validate_modification_response(response, existing_files, app_name, safe_bundle_id)
 
                 if validated_response and "files" in validated_response:
                     print(f"Claude applied modifications: {validated_response.get('modification_summary', 'Changes applied')}")
+                    print(f"Using bundle ID: {validated_response['bundle_id']}")
                     return validated_response
                 else:
                     raise Exception("Invalid modification response from Claude")
@@ -103,52 +212,15 @@ You think creatively and never produce cookie-cutter solutions. Each app you cre
             print(f"Error in app modification: {str(e)}")
             raise
 
-    def _validate_modification_response(self, response: Dict, existing_files: List[Dict], app_name: str) -> Dict:
+    def _validate_modification_response(self, response: Dict, existing_files: List[Dict],
+                                        app_name: str, safe_bundle_id: str) -> Dict:
         """Validate and fix the modification response structure"""
 
-        # Ensure we have a files array
         if "files" not in response:
-            print("Warning: No 'files' key in response, attempting to construct from existing files")
             response["files"] = existing_files
 
-        # Validate each file has required fields
-        validated_files = []
-
-        for file in response.get("files", []):
-            # Check if it's a properly structured file
-            if isinstance(file, dict):
-                # Ensure it has both path and content
-                if "path" in file and "content" in file:
-                    validated_files.append(file)
-                elif "content" in file:
-                    # Try to infer path from existing files
-                    print(f"Warning: File missing 'path', attempting to match by content")
-                    matched = False
-                    for existing_file in existing_files:
-                        # Simple matching - in production, this could be more sophisticated
-                        if len(file["content"]) > 100 and existing_file["path"].endswith(".swift"):
-                            file["path"] = existing_file["path"]
-                            validated_files.append(file)
-                            matched = True
-                            break
-
-                    if not matched:
-                        # Default path
-                        file["path"] = "Sources/ModifiedFile.swift"
-                        validated_files.append(file)
-                else:
-                    print(f"Warning: Invalid file structure: {file}")
-            else:
-                print(f"Warning: File is not a dictionary: {file}")
-
-        # If no valid files were found, use existing files
-        if not validated_files:
-            print("Warning: No valid files in response, using existing files")
-            validated_files = existing_files
-
-        # Ensure other required fields
-        if "bundle_id" not in response:
-            response["bundle_id"] = f"com.swiftgen.{app_name.lower().replace(' ', '')}"
+        # ALWAYS use the safe bundle ID
+        response["bundle_id"] = safe_bundle_id
 
         if "app_name" not in response:
             response["app_name"] = app_name
@@ -156,229 +228,165 @@ You think creatively and never produce cookie-cutter solutions. Each app you cre
         if "features" not in response:
             response["features"] = ["Modifications applied"]
 
-        response["files"] = validated_files
-
         return response
 
-    def _create_intelligent_generation_prompt(self, description: str, app_name: Optional[str]) -> str:
-        """Create a prompt that unleashes Claude's creativity with better understanding"""
+    def _create_intelligent_generation_prompt(self, description: str, app_name: Optional[str],
+                                              safe_bundle_id: str) -> str:
+        """Create a prompt that unleashes Claude's creativity with proper string formatting"""
 
-        # Generate uniqueness factors
-        time_context = datetime.now()
-        unique_seed = hashlib.md5(f"{time_context.isoformat()}{description}{random.random()}".encode()).hexdigest()[:8]
+        unique_seed = hashlib.md5(f"{datetime.now().isoformat()}{description}{random.random()}".encode()).hexdigest()[:8]
 
-        # Time-based creativity hints
-        hour = time_context.hour
-        if hour < 6:
-            time_hint = "late night creative energy - think outside the box"
-        elif hour < 12:
-            time_hint = "morning freshness - bright and energizing"
-        elif hour < 17:
-            time_hint = "afternoon productivity - focused and efficient"
-        elif hour < 21:
-            time_hint = "evening relaxation - smooth and calming"
-        else:
-            time_hint = "night time sophistication - elegant and refined"
+        prompt = f"""Create a UNIQUE SwiftUI iOS app based on this request: "{description}"
 
-        # Random design inspiration
-        design_inspirations = [
-            "Apple's latest iOS design language with subtle depth",
-            "Minimalist Japanese design principles",
-            "Bold Memphis design with geometric shapes",
-            "Organic, nature-inspired interfaces",
-            "Retro-futuristic cyberpunk aesthetics",
-            "Swiss design with perfect typography",
-            "Playful material design with delightful animations",
-            "Luxury brand design language",
-            "Video game-inspired interactive elements",
-            "Magazine editorial layouts"
-        ]
+CRITICAL REQUIREMENTS:
+1. Create EXACTLY what the user asked for - analyze their specific needs
+2. Make it UNIQUE - even if someone else asks for a similar app, yours should be different
+3. Add creative touches, unique features, and thoughtful UX that sets this app apart
+4. Use modern SwiftUI patterns (iOS 15+) and best practices
+5. Think beyond basic functionality - what would make this app exceptional?
+6. CRITICAL: Use EXACTLY this bundle ID: {safe_bundle_id} - DO NOT use "com.swiftgen.myapp"
+7. ENSURE all files have actual Swift code content - no empty strings
 
-        design_inspiration = random.choice(design_inspirations)
+UNIQUENESS FACTORS TO CONSIDER:
+- Visual design and color schemes
+- Layout and navigation patterns  
+- Additional helpful features the user didn't explicitly ask for
+- Smooth animations and transitions
+- Thoughtful edge cases handling
+- Accessibility features
+- Performance optimizations
 
-        # Color mood
-        color_moods = [
-            "vibrant gradients that catch the eye",
-            "sophisticated monochrome with accent colors",
-            "nature-inspired earth tones",
-            "bold contrasting colors",
-            "soft pastels with gentle transitions",
-            "deep, rich jewel tones",
-            "tech-inspired neon accents",
-            "calming ocean palette"
-        ]
+TECHNICAL REQUIREMENTS:
+- @Environment(\.dismiss) private var dismiss (NOT presentationMode)
+- Text("Hello") with double quotes (NOT 'Hello' or ""Hello"")
+- Ensure all interactive elements (buttons, taps, gestures) have proper implementations
+- All calculations and state changes must update the UI
+- Every file must have complete, working Swift code
 
-        color_mood = random.choice(color_moods)
+IMPORTANT: Bundle ID must be exactly: {safe_bundle_id}
+DO NOT USE: com.swiftgen.myapp
 
-        # Analyze the request to understand intent better
-        desc_lower = description.lower()
-        clarification = ""
+UNIQUE SEED FOR VARIATION: {unique_seed}
 
-        # Check for theme/style references
-        if "theme" in desc_lower or "style" in desc_lower or "like" in desc_lower:
-            clarification = """
-IMPORTANT CLARIFICATION:
-If the user mentions "X theme" or "X style" or "like X", they usually mean:
-- Create the type of app they explicitly mentioned (menu, calculator, timer, etc.)
-- Style it visually similar to X (colors, layout, design patterns)
-- NOT create a clone of X
-
-For example:
-- "menu app with Uber Eats theme" = Restaurant menu app that looks like Uber Eats UI
-- "calculator with Apple style" = Calculator app with Apple's design aesthetics
-- "timer like Spotify" = Timer app with Spotify's visual style
-"""
-
-        prompt = f"""Create a UNIQUE iOS app based on this request:
-
-USER REQUEST: "{description}"
-{"APP NAME: " + app_name if app_name else "APP NAME: Extract from the request or create a creative name"}
-{clarification}
-
-UNDERSTANDING THE REQUEST:
-1. First, identify the CORE APP TYPE the user wants:
-   - Is it explicitly mentioned? (menu, calculator, timer, todo, etc.)
-   - What is the primary functionality they need?
-
-2. Then identify any STYLE/THEME references:
-   - Are they asking for a specific visual style?
-   - Do they reference another app for design inspiration?
-
-3. Be careful not to confuse:
-   - "X theme/style" = visual design like X
-   - "app like X" = functionality similar to X
-   - "X app" = the type of app is X
-
-UNIQUENESS REQUIREMENTS:
-- Unique Seed: {unique_seed}
-- Time Context: {time_hint}
-- Design Inspiration: {design_inspiration}
-- Color Mood: {color_mood}
-- Random Factor: {random.randint(1, 1000)}
-
-CRITICAL TECHNICAL REQUIREMENTS:
-1. ALWAYS import SwiftUI at the top of EVERY Swift file
-2. Ensure @main struct conforms to App protocol
-3. Include all necessary imports (Foundation, Combine, etc.)
-4. Use proper Swift syntax and iOS 16+ features
-5. Make sure ALL code compiles without errors
-
-CREATIVE REQUIREMENTS:
-1. Generate a COMPLETELY UNIQUE implementation
-2. Add unexpected delightful features
-3. Use smooth animations and transitions
-4. Make it feel premium and polished
-5. Include at least ONE surprising feature
-
-Return a JSON object with this EXACT structure:
+Return ONLY a valid JSON object (no explanatory text):
 {{
     "files": [
         {{
-            "path": "Sources/AppMain.swift",
-            "content": "import SwiftUI\n\n@main\nstruct AppNameApp: App {{\n    var body: some Scene {{\n        WindowGroup {{\n            ContentView()\n        }}\n    }}\n}}"
+            "path": "Sources/App.swift",
+            "content": "// Your COMPLETE unique implementation with actual Swift code"
         }},
         {{
-            "path": "Sources/ContentView.swift",
-            "content": "import SwiftUI\n\n// Your unique implementation here"
-        }},
-        // Add more files if needed
+            "path": "Sources/ContentView.swift", 
+            "content": "// Your COMPLETE unique implementation with actual Swift code"
+        }}
+        // Add more files as needed for your unique architecture
     ],
-    "features": [
-        "Specific feature 1 that you implemented",
-        "Specific feature 2 that you implemented"
-    ],
-    "bundle_id": "com.swiftgen.{{app_name_lowercase}}",
-    "app_name": "{{AppName}}",
-    "unique_aspects": "What makes this implementation special",
-    "design_notes": "Design decisions you made"
-}}
-
-Remember:
-- ALWAYS import SwiftUI in EVERY Swift file
-- Two users asking for the same type of app should get COMPLETELY DIFFERENT implementations
-- Understand what TYPE of app they want vs what STYLE they want"""
+    "features": ["List of unique features you implemented"],
+    "bundle_id": "{safe_bundle_id}",
+    "app_name": "{app_name or 'Your chosen app name'}",
+    "unique_aspects": "What makes this implementation special and different"
+}}"""
 
         return prompt
 
     def _create_intelligent_modification_prompt(self, app_name: str, original_description: str,
-                                              modification_request: str, existing_files: List[Dict]) -> str:
-        """Create a prompt for intelligent modifications"""
+                                                modification_request: str, existing_files: List[Dict],
+                                                safe_bundle_id: str) -> str:
+        """Create a prompt for intelligent modifications with proper string formatting"""
 
-        # Prepare existing code
         code_context = "\n\n".join([
             f"File: {file['path']}\n```swift\n{file['content']}\n```"
             for file in existing_files
         ])
 
-        # Generate modification context
-        mod_seed = hashlib.md5(f"{modification_request}{datetime.now().isoformat()}".encode()).hexdigest()[:8]
+        # Analyze the modification request to provide intelligent context
+        additional_instructions = ""
 
-        prompt = f"""You need to modify an existing iOS app based on a user request.
+        # Generic pattern detection for common issues
+        request_lower = modification_request.lower()
 
-CURRENT APP:
-- App Name: {app_name}
-- Original Purpose: {original_description}
+        if any(phrase in request_lower for phrase in ["not work", "doesn't work", "broken", "not functioning", "nothing happens"]):
+            if "button" in request_lower or "click" in request_lower or "tap" in request_lower:
+                additional_instructions = """
+INTELLIGENT ANALYSIS: User reports interactive element not functioning.
 
-USER'S MODIFICATION REQUEST: "{modification_request}"
+GENERIC DEBUGGING APPROACH:
+1. Identify the non-functioning UI element in the current code
+2. Trace its action/binding to understand what SHOULD happen
+3. Common issues to check:
+   - Empty or missing action closures
+   - Functions that don't modify any @State/@Published variables
+   - Missing bindings between UI and data
+   - Calculations that don't update display values
+   
+4. Fix by ensuring:
+   - Actions have actual implementation
+   - State changes trigger UI updates
+   - All user interactions produce visible results
+   - Data flow is properly connected
 
-EXISTING CODE:
+IMPORTANT: Analyze the SPECIFIC app context and fix accordingly. Don't assume app type.
+"""
+            elif "display" in request_lower or "show" in request_lower or "update" in request_lower:
+                additional_instructions = """
+INTELLIGENT ANALYSIS: User reports display/update issues.
+
+Investigate:
+1. Data binding connections
+2. @State/@Published variable updates
+3. View refresh triggers
+4. Conditional rendering logic
+"""
+            elif "calculate" in request_lower or "compute" in request_lower:
+                additional_instructions = """
+INTELLIGENT ANALYSIS: User reports calculation issues.
+
+Ensure:
+1. Input validation and conversion
+2. Calculation logic correctness
+3. Result storage in observable properties
+4. UI updates after calculation
+"""
+
+        prompt = f"""Modify this iOS app based on the request: "{modification_request}"
+
+Current app: {app_name}
+Original purpose: {original_description}
+
+Current code:
 {code_context}
 
-MODIFICATION REQUIREMENTS:
-1. UNDERSTAND the modification request:
-   - What exactly does the user want to change?
-   - Is it visual? Functional? Bug fix? New feature?
-   - What's the intent behind the request?
+{additional_instructions}
 
-2. MAKE REAL CHANGES:
-   - Don't just return the same code
-   - Actually implement what the user asked for
-   - If they say "add dark mode", add real dark mode support
-   - If they say "make buttons bigger", make them bigger
-   - If they say "add animation", add actual animations
+Make the requested changes and return the COMPLETE modified code.
 
-3. PRESERVE & ENHANCE:
-   - Keep all existing functionality working
-   - Maintain the app's unique character
-   - Add smooth transitions for any UI changes
-   - Improve code quality where possible
+CRITICAL SYNTAX RULES:
+- Use double quotes " for all strings (NOT single quotes ')
+- Use @Environment(\.dismiss) NOT presentationMode
+- Fix any syntax errors you see
+- Ensure all Button actions actually perform their intended function
+- Every file must have complete, working Swift code
 
-4. BE CREATIVE:
-   - Modification Seed: {mod_seed}
-   - Don't just do the minimum - exceed expectations
-   - Add related improvements that make sense
+IMPORTANT: Keep the EXACT SAME bundle ID: {safe_bundle_id}
+NO SPACES IN BUNDLE ID!
 
-CRITICAL: Return a properly formatted JSON object with this EXACT structure:
+Return ONLY a valid JSON object (no explanatory text) with ALL files:
 {{
     "files": [
         {{
-            "path": "Sources/AppMain.swift",
-            "content": "// The complete modified AppMain.swift code"
+            "path": "Sources/App.swift",
+            "content": "// Complete modified code with PROPER SYNTAX and actual content"
         }},
         {{
             "path": "Sources/ContentView.swift",
-            "content": "// The complete modified ContentView.swift code"
+            "content": "// Complete modified code with PROPER SYNTAX and actual content"
         }}
-        // Include ALL files, both modified and unmodified
-        // Each file MUST have both "path" and "content" keys
     ],
-    "features": [
-        "Specific change 1 that was made",
-        "Specific change 2 that was made"
-    ],
-    "bundle_id": "{f"com.swiftgen.{app_name.lower().replace(' ', '')}"}",
+    "features": ["Original features", "NEW: Changes made"],
+    "bundle_id": "{safe_bundle_id}",
     "app_name": "{app_name}",
-    "modification_summary": "Clear explanation of what was changed and why"
-}}
-
-IMPORTANT FORMATTING RULES:
-- Each file object MUST have "path" and "content" keys
-- The "path" must match the original file paths exactly
-- Include the COMPLETE file content, not snippets
-- Return ALL files from the app, whether modified or not
-- Ensure the JSON is properly formatted without syntax errors
-
-The user wants their app modified. Make sure you actually change the code based on their request!"""
+    "modification_summary": "What was changed"
+}}"""
 
         return prompt
 
@@ -400,7 +408,7 @@ The user wants their app modified. Make sure you actually change the code based 
                             }
                         ],
                         "max_tokens": 4096,
-                        "temperature": 0.8  # Higher temperature for more creativity
+                        "temperature": 0.7
                     }
                 )
 
@@ -408,259 +416,333 @@ The user wants their app modified. Make sure you actually change the code based 
                     result = response.json()
                     content = result['content'][0]['text']
 
-                    # Extract and parse JSON from response
+                    # DEBUG: Print Claude's response
+                    print("\n=== CLAUDE'S RESPONSE (first 1000 chars) ===")
+                    print(content[:1000])
+                    print("=== END RESPONSE PREVIEW ===\n")
+
+                    # Try to extract JSON
                     parsed = self._extract_json_from_response(content)
 
                     if parsed and "files" in parsed and len(parsed["files"]) > 0:
+                        # Log the actual files we're returning
+                        print(f"[CLAUDE SERVICE] Successfully parsed {len(parsed['files'])} files:")
+                        for file in parsed["files"]:
+                            print(f"  - {file['path']} ({len(file.get('content', ''))} chars)")
+                            # Log first 200 chars of content for debugging
+                            content_preview = file.get('content', '')[:200].replace('\n', '\\n')
+                            print(f"    Preview: {content_preview}...")
+
+                        # Ensure files have content
+                        parsed = self._ensure_files_have_content(parsed)
+
                         return parsed
                     else:
-                        print("Invalid response structure from Claude")
-                        return None
+                        # If JSON parsing fails, try to construct from content
+                        print("Failed to parse as JSON, attempting to extract code...")
+                        constructed = self._construct_json_from_content(content)
+                        if constructed and "files" in constructed:
+                            print(f"Constructed {len(constructed['files'])} files from content")
+                            constructed = self._ensure_files_have_content(constructed)
+                            return constructed
+                        else:
+                            raise Exception("Could not extract valid app data from response")
 
                 else:
                     print(f"Claude API error: {response.status_code}")
                     print(f"Response: {response.text}")
-
-                    # Handle rate limits
-                    if response.status_code == 429:
-                        print("Rate limited. Please wait before trying again.")
-                    elif response.status_code == 401:
-                        print("Invalid API key. Please check your CLAUDE_API_KEY.")
-
                     return None
 
             except httpx.TimeoutException:
-                print("Request to Claude timed out. The request might be too complex.")
-                return None
+                print("Request to Claude timed out")
+                raise
             except Exception as e:
                 print(f"Error calling Claude API: {str(e)}")
-                return None
+                raise
 
     def _extract_json_from_response(self, content: str) -> Optional[Dict]:
-        """Extract and parse JSON from Claude's response, handling various formats"""
+        """Extract and parse JSON from Claude's response - ENHANCED VERSION"""
 
-        try:
-            # Method 1: Try to parse the entire content as JSON
-            return json.loads(content)
-        except:
-            pass
+        # Remove any text before the JSON
+        content = content.strip()
 
+        # Method 1: Direct parse (if response is pure JSON)
         try:
-            # Method 2: Look for JSON wrapped in ```json blocks
+            result = json.loads(content)
+            # CRITICAL: Validate bundle ID
+            if "bundle_id" in result and result["bundle_id"] == "com.swiftgen.myapp":
+                print("WARNING: Claude returned generic bundle ID")
+            return result
+        except Exception as e:
+            print(f"Direct JSON parse failed: {e}")
+
+        # Method 2: Find JSON after common prefixes
+        # Claude often prefixes with explanatory text
+        common_prefixes = [
+            "Here is the modified code",
+            "Here is the complete modified code",
+            "Here's the fixed code",
+            "I'll fix",
+            "Let me fix",
+            "Here is the fixed",
+            "Here are the fixed files",
+            "Fixed the",
+            "I've fixed",
+            "Here is a unique",
+            "Here's a unique",
+            "I'll create",
+            "Let me create"
+        ]
+
+        for prefix in common_prefixes:
+            if content.lower().startswith(prefix.lower()):
+                # Find the first { after the prefix
+                json_start = content.find('{')
+                if json_start > 0:
+                    try:
+                        json_end = self._find_matching_brace(content, json_start)
+                        if json_end > json_start:
+                            json_str = content[json_start:json_end + 1]
+                            return json.loads(json_str)
+                    except Exception as e:
+                        print(f"JSON parse after prefix '{prefix}' failed: {e}")
+
+        # Method 3: Find JSON in markdown
+        try:
             if "```json" in content:
                 json_start = content.find("```json") + 7
                 json_end = content.find("```", json_start)
                 if json_end > json_start:
                     json_str = content[json_start:json_end].strip()
                     return json.loads(json_str)
-        except:
-            pass
-
-        try:
-            # Method 3: Find JSON by looking for { and }
-            json_start = content.find('{')
-            json_end = content.rfind('}') + 1
-
-            if json_start >= 0 and json_end > json_start:
-                json_str = content[json_start:json_end]
-                return json.loads(json_str)
-        except:
-            pass
-
-        # Method 4: Try to extract code blocks and construct JSON manually
-        try:
-            return self._construct_json_from_content(content)
         except Exception as e:
-            print(f"Failed to extract JSON from response: {e}")
-            return None
+            print(f"Markdown JSON parse failed: {e}")
 
-    def _construct_json_from_content(self, content: str) -> Dict:
-        """Construct JSON from Claude's response when it's not properly formatted"""
+        # Method 4: Find raw JSON object with proper brace matching
+        try:
+            # Find the first { that looks like JSON start
+            json_start = content.find('{')
+            if json_start >= 0:
+                # Use proper brace matching to find the end
+                json_end = self._find_matching_brace(content, json_start)
+                if json_end > json_start:
+                    json_str = content[json_start:json_end + 1]
+                    result = json.loads(json_str)
 
-        # This handles cases where Claude returns Swift code outside of proper JSON
+                    # Validate it has the expected structure
+                    if "files" in result and isinstance(result["files"], list):
+                        return result
+        except Exception as e:
+            print(f"Raw JSON parse with brace matching failed: {e}")
+
+        # Method 5: Try to find JSON by looking for "files" array pattern
+        try:
+            files_pattern = r'"files"\s*:\s*\['
+            match = re.search(files_pattern, content)
+            if match:
+                # Backtrack to find the opening brace
+                for i in range(match.start(), -1, -1):
+                    if content[i] == '{':
+                        json_start = i
+                        json_end = self._find_matching_brace(content, json_start)
+                        if json_end > json_start:
+                            json_str = content[json_start:json_end + 1]
+                            return json.loads(json_str)
+        except Exception as e:
+            print(f"Pattern-based JSON parse failed: {e}")
+
+        return None
+
+    def _find_matching_brace(self, content: str, start_pos: int) -> int:
+        """Find the matching closing brace for an opening brace"""
+        if start_pos >= len(content) or content[start_pos] != '{':
+            return -1
+
+        brace_count = 0
+        in_string = False
+        escape_next = False
+
+        for i in range(start_pos, len(content)):
+            char = content[i]
+
+            if escape_next:
+                escape_next = False
+                continue
+
+            if char == '\\':
+                escape_next = True
+                continue
+
+            if char == '"' and not in_string:
+                in_string = True
+            elif char == '"' and in_string:
+                in_string = False
+            elif not in_string:
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        return i
+
+        return -1
+
+    def _construct_json_from_content(self, content: str) -> Optional[Dict]:
+        """Construct JSON from Claude's response when JSON parsing fails"""
+
         files = []
 
-        # Look for file paths and their content
-        lines = content.split('\n')
-        current_file = None
-        current_content = []
-        in_code_block = False
-
-        for line in lines:
-            # Check for file path indicators
-            if '"path":' in line:
-                # Save previous file if exists
-                if current_file and current_content:
-                    files.append({
-                        "path": current_file,
-                        "content": '\n'.join(current_content).strip()
-                    })
-                    current_content = []
-
-                # Extract file path
-                try:
-                    path_match = re.search(r'"path":\s*"([^"]+)"', line)
-                    if path_match:
-                        current_file = path_match.group(1)
-                except:
-                    pass
-
-            # Check for content start
-            elif '"content":' in line:
-                in_code_block = True
-                # Try to extract content from the same line if it's there
-                try:
-                    content_match = re.search(r'"content":\s*"(.+)"', line)
-                    if content_match:
-                        # Single line content
-                        content_str = content_match.group(1)
-                        # Unescape the content
-                        content_str = content_str.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-                        if current_file:
-                            files.append({
-                                "path": current_file,
-                                "content": content_str
-                            })
-                            current_file = None
-                            in_code_block = False
-                except:
-                    pass
-
-            # Collect code content
-            elif in_code_block and current_file:
-                # Look for the end of content
-                if '"}' in line or '"},' in line:
-                    # Extract content before the closing
-                    content_part = line.split('"}')[0].split('"},')[0]
-                    if content_part.strip():
-                        current_content.append(content_part)
-
-                    # Save the file
-                    if current_content:
-                        content_str = '\n'.join(current_content)
-                        # Unescape the content
-                        content_str = content_str.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-                        files.append({
-                            "path": current_file,
-                            "content": content_str.strip()
-                        })
-
-                    current_file = None
-                    current_content = []
-                    in_code_block = False
-                else:
-                    current_content.append(line)
-
-        # Handle any remaining file
-        if current_file and current_content:
-            content_str = '\n'.join(current_content)
-            content_str = content_str.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-            files.append({
-                "path": current_file,
-                "content": content_str.strip()
-            })
-
-        # Extract other fields
-        app_name = "MyApp"
-        features = []
-
-        # Try to find app name
-        app_name_match = re.search(r'"app_name":\s*"([^"]+)"', content)
-        if app_name_match:
-            app_name = app_name_match.group(1)
-
-        # Try to find features
-        if '"features"' in content:
-            features_match = re.search(r'"features":\s*\[(.*?)\]', content, re.DOTALL)
-            if features_match:
-                features_str = features_match.group(1)
-                # Extract individual features
-                feature_matches = re.findall(r'"([^"]+)"', features_str)
-                features = feature_matches
-
-        # If we found files, construct a valid response
-        if files:
-            return {
-                "files": files,
-                "features": features if features else ["Generated from Claude response"],
-                "bundle_id": f"com.swiftgen.{app_name.lower().replace(' ', '')}",
-                "app_name": app_name,
-                "unique_aspects": "AI-generated unique implementation"
-            }
-
-        # Last resort: Look for Swift code blocks and create files from them
+        # Look for Swift code blocks
         swift_blocks = re.findall(r'```swift(.*?)```', content, re.DOTALL)
+
+        print(f"Found {len(swift_blocks)} Swift code blocks")
+
         if swift_blocks:
             for i, code in enumerate(swift_blocks):
-                # Determine file name based on content
-                if "@main" in code:
+                code = code.strip()
+
+                # Determine file type
+                if "@main" in code or "App:" in code:
                     files.append({
-                        "path": "Sources/AppMain.swift",
-                        "content": code.strip()
+                        "path": "Sources/App.swift",
+                        "content": code
                     })
                 elif "ContentView" in code:
                     files.append({
                         "path": "Sources/ContentView.swift",
-                        "content": code.strip()
+                        "content": code
                     })
                 else:
-                    files.append({
-                        "path": f"Sources/File{i}.swift",
-                        "content": code.strip()
-                    })
+                    # Try to get struct name
+                    struct_match = re.search(r'struct\s+(\w+)\s*:', code)
+                    if struct_match:
+                        struct_name = struct_match.group(1)
+                        files.append({
+                            "path": f"Sources/{struct_name}.swift",
+                            "content": code
+                        })
+                    else:
+                        files.append({
+                            "path": f"Sources/File{i}.swift",
+                            "content": code
+                        })
 
-            if files:
-                return {
-                    "files": files,
-                    "features": ["Generated from Swift code blocks"],
-                    "bundle_id": f"com.swiftgen.app",
-                    "app_name": "Generated App",
-                    "unique_aspects": "AI-generated implementation"
-                }
+        if not files:
+            print("No Swift code blocks found")
+            return None
 
-        raise Exception("Could not extract valid app data from response")
+        # Extract app name
+        app_name = "MyApp"
+
+        # Try to find app name in various ways
+        patterns = [
+            r'struct\s+(\w+)App\s*:\s*App',
+            r'"app_name":\s*"([^"]+)"',
+            r'named?\s+["\']*([A-Za-z][A-Za-z0-9\s]+)["\']*',
+            r'called?\s+["\']*([A-Za-z][A-Za-z0-9\s]+)["\']*'
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                app_name = match.group(1).strip()
+                break
+
+        # Create safe bundle ID
+        safe_bundle_id = self._create_safe_bundle_id(app_name)
+
+        return {
+            "files": files,
+            "features": ["Generated from Claude response"],
+            "bundle_id": safe_bundle_id,
+            "app_name": app_name,
+            "unique_aspects": "AI-generated implementation"
+        }
 
     async def analyze_build_errors(self, errors: List[str], project_files: List[Dict]) -> Dict:
-        """Let Claude analyze and fix build errors"""
+        """Let Claude analyze and fix build errors - THIS IS THE KEY METHOD"""
 
         if not self.api_key:
-            raise ValueError("Claude API key required for error analysis")
+            print("No Claude API key - cannot fix build errors intelligently")
+            return {
+                "files": project_files,
+                "fixes_applied": ["No API key available"]
+            }
 
+        # Create a comprehensive prompt for Claude to fix the errors
         error_text = "\n".join(errors)
+
+        # Include ALL files that have errors
+        files_with_errors = []
+        for file in project_files:
+            # Check if this file is mentioned in any error
+            if any(file["path"] in error for error in errors):
+                files_with_errors.append(file)
+
+        # If no specific files found, include all files
+        if not files_with_errors:
+            files_with_errors = project_files
+
         code_context = "\n\n".join([
             f"File: {file['path']}\n```swift\n{file['content']}\n```"
-            for file in project_files
+            for file in files_with_errors
         ])
 
-        prompt = f"""Analyze these iOS build errors and provide fixes:
+        prompt = f"""You are an expert Swift developer. Fix these Swift compilation errors.
 
 BUILD ERRORS:
 {error_text}
 
-CURRENT CODE:
+CURRENT CODE WITH ERRORS:
 {code_context}
 
-Analyze the errors and provide corrected code. Focus on:
-1. Understanding the root cause of each error
-2. Providing minimal, targeted fixes
-3. Ensuring the fixes don't break other functionality
-4. Following Swift best practices
+ANALYSIS:
+1. Look at each error carefully
+2. Understand what's causing it
+3. Apply the correct fix
 
-Return a JSON object with corrected files:
+COMMON FIXES:
+- "generic parameter 'T' could not be inferred @Environment(.presentationMode)" → Use @Environment(\.dismiss) private var dismiss
+- "single-quoted string literal found" → Replace ALL single quotes ' with double quotes "
+- "unterminated string literal" → Ensure all strings have matching quotes
+- TextField("text"", ...) → TextField("text", ...)
+
+Return ONLY a JSON object with ALL the files (fixed) and ensure each file has actual content:
 {{
     "files": [
         {{
-            "path": "Sources/filename.swift",
-            "content": "// Corrected Swift code"
+            "path": "Sources/ContentView.swift",
+            "content": "// COMPLETE FIXED CODE HERE - not empty!"
         }}
+        // Include ALL files that need fixes
     ],
     "fixes_applied": [
-        "Description of each fix"
-    ],
-    "root_causes": [
-        "Root cause analysis"
+        "Replaced presentationMode with dismiss",
+        "Fixed single quotes to double quotes",
+        // List each fix you made
     ]
-}}"""
+}}
 
-        response = await self._call_claude_api(prompt)
-        return response if response else {"files": project_files, "fixes_applied": ["Unable to analyze errors"]}
+IMPORTANT: Return the COMPLETE fixed code for each file, not just snippets. Every file must have actual Swift code content."""
+
+        try:
+            print("Sending errors to Claude for intelligent fixing...")
+            response = await self._call_claude_api(prompt)
+
+            if response and "files" in response:
+                # Ensure files have content
+                response = self._ensure_files_have_content(response)
+                print(f"Claude fixed errors: {response.get('fixes_applied', [])}")
+                return response
+            else:
+                print("Claude response didn't contain fixed files")
+                return {
+                    "files": project_files,
+                    "fixes_applied": ["Claude couldn't parse the errors"]
+                }
+        except Exception as e:
+            print(f"Error calling Claude for fixes: {e}")
+            return {
+                "files": project_files,
+                "fixes_applied": [f"Error calling Claude: {str(e)}"]
+            }

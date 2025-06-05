@@ -8,6 +8,7 @@ import os
 import sys
 import json
 from datetime import datetime
+from fastapi.responses import FileResponse
 from typing import Optional, Dict, List
 
 # Add current directory to Python path to ensure local imports work
@@ -17,6 +18,23 @@ from claude_service import ClaudeService
 from build_service import BuildService
 from project_manager import ProjectManager
 from models import GenerateRequest, BuildStatus, ProjectStatus
+
+# Import EnhancedClaudeService if available
+try:
+    # Try both possible naming conventions
+    try:
+        from enhanced_claude_service import EnhancedClaudeService
+    except ImportError:
+        from enhancedClaudeService import EnhancedClaudeService
+
+    enhanced_service = EnhancedClaudeService()
+    use_enhanced_service = True
+    print("Using Enhanced Multi-LLM Service")
+except Exception as e:
+    enhanced_service = None
+    use_enhanced_service = False
+    print(f"Enhanced service not available: {str(e)}")
+    print("Using standard Claude service")
 
 # Import SimulatorService - we'll handle if it doesn't exist
 try:
@@ -55,8 +73,14 @@ class ModifyRequest(BaseModel):
     context: Optional[Dict] = None
 
 @app.get("/")
-async def root():
-    return {"message": "SwiftGen MVP API", "version": "0.2.0"}
+async def serve_index():
+    """Serve the main application page"""
+    return FileResponse("../frontend/index.html")
+
+@app.get("/editor.html")
+async def serve_editor():
+    """Serve the code editor page"""
+    return FileResponse("../frontend/editor.html")
 
 @app.post("/api/generate")
 async def generate_app(request: GenerateRequest):
@@ -80,85 +104,161 @@ async def generate_app(request: GenerateRequest):
         # Update connected clients
         await notify_clients(project_id, {
             "type": "status",
-            "message": "Generating Swift code...",
-            "status": "generating"
+            "message": "Analyzing your request...",
+            "status": "analyzing"
         })
 
-        # Generate code using Claude
-        generated_code = await claude_service.generate_ios_app(
-            request.description,
-            request.app_name or "MyApp"
+        # Generate code using enhanced service if available, otherwise use standard
+        if use_enhanced_service and enhanced_service:
+            print(f"[MAIN] Using enhanced multi-LLM service for generation")
+            generated_code = await enhanced_service.generate_ios_app_multi_llm(
+                description=request.description,
+                app_name=request.app_name
+            )
+        else:
+            print(f"[MAIN] Using standard Claude service for generation")
+            generated_code = await claude_service.generate_ios_app(
+                description=request.description,
+                app_name=request.app_name
+            )
+
+        # CRITICAL: Debug what we received
+        print(f"\n[MAIN] Generated code structure:")
+        print(f"  Type: {type(generated_code)}")
+        print(f"  Keys: {generated_code.keys() if isinstance(generated_code, dict) else 'Not a dict'}")
+        print(f"  Number of files: {len(generated_code.get('files', []))}")
+
+        # Log file details
+        if "files" in generated_code:
+            for i, file in enumerate(generated_code["files"]):
+                print(f"  File {i+1}: {file.get('path', 'unknown')} ({len(file.get('content', ''))} chars)")
+
+        # Get the actual app name from the response
+        actual_app_name = generated_code.get("app_name", request.app_name or "MyApp")
+
+        # CRITICAL FIX: Create project with the generated code AS IS
+        await notify_clients(project_id, {
+            "type": "status",
+            "message": f"Creating {actual_app_name} with unique features...",
+            "status": "creating"
+        })
+
+        # Create project structure - pass the ENTIRE generated_code dict
+        print(f"\n[MAIN] Passing generated_code to project_manager.create_project")
+        project_path = await project_manager.create_project(
+            project_id,
+            generated_code,  # Pass the entire dict with files
+            actual_app_name
         )
 
-        # Store project context for future modifications
+        # CRITICAL: Get the actual bundle ID from the project metadata
+        project_metadata_path = os.path.join(project_path, "project.json")
+        with open(project_metadata_path, 'r') as f:
+            project_metadata = json.load(f)
+
+        # Use the CORRECT bundle ID from project manager
+        correct_bundle_id = project_metadata['bundle_id']
+        correct_product_name = project_metadata['product_name']
+
+        print(f"[MAIN] Using CORRECT bundle ID: {correct_bundle_id} (not {generated_code.get('bundle_id', 'none')})")
+
+        # Log which LLM was used if multi-LLM
+        if generated_code.get("multi_llm_generated"):
+            print(f"[MAIN] App generated using multiple LLMs")
+
+        # Store project context for future modifications with CORRECT bundle ID
         project_contexts[project_id] = {
-            "app_name": request.app_name or "MyApp",
+            "app_name": actual_app_name,
             "description": request.description,
+            "bundle_id": correct_bundle_id,  # Use the CORRECT bundle ID
+            "product_name": correct_product_name,
             "generated_files": generated_code.get("files", []),
-            "features": [],
-            "modifications": []
+            "features": generated_code.get("features", []),
+            "unique_aspects": generated_code.get("unique_aspects", ""),
+            "modifications": [],
+            "generated_by_llm": generated_code.get("generated_by_llm", "claude")
         }
 
         await notify_clients(project_id, {
             "type": "status",
-            "message": "Creating project structure...",
-            "status": "creating"
-        })
-
-        # Create project structure
-        project_path = await project_manager.create_project(
-            project_id,
-            generated_code,
-            request.app_name or "MyApp"
-        )
-
-        await notify_clients(project_id, {
-            "type": "status",
-            "message": "Building app...",
+            "message": "Building your unique app...",
             "status": "building"
         })
 
-        # Build the project
-        bundle_id = generated_code.get("bundle_id")
+        # Build the project with the CORRECT bundle ID
+        build_result = await build_service.build_project(project_path, project_id, correct_bundle_id)
 
-        # Check if build_service has the new method signature
-        if 'bundle_id' in build_service.build_project.__code__.co_varnames:
-            build_result = await build_service.build_project(project_path, project_id, bundle_id)
-        else:
-            build_result = await build_service.build_project(project_path, project_id)
+        # Determine final status based on build and launch results
+        final_status = "failed"
+        status_type = "error"
 
         if build_result.success:
             simulator_launched = getattr(build_result, 'simulator_launched', False)
+
+            if simulator_launched:
+                final_status = "success"
+                status_type = "complete"
+            else:
+                # Build succeeded but launch failed
+                final_status = "warning"
+                status_type = "complete"
+
+            unique_message = f"""✅ {actual_app_name} has been created successfully!
+
+Unique features: {', '.join(generated_code.get('features', [])[:3])}
+
+{generated_code.get('unique_aspects', '')}"""
+
             if simulator_launched:
                 await notify_clients(project_id, {
-                    "type": "complete",
-                    "message": "App built and launched in simulator!",
+                    "type": status_type,
+                    "message": unique_message + "\n\n📱 The app is now running in the iOS Simulator!",
                     "status": "success",
                     "project_id": project_id,
-                    "simulator_launched": True
+                    "simulator_launched": True,
+                    "app_name": actual_app_name
                 })
             else:
-                await notify_clients(project_id, {
-                    "type": "complete",
-                    "message": "App built successfully!",
-                    "status": "success",
-                    "project_id": project_id,
-                    "simulator_launched": False,
-                    "warnings": build_result.warnings
-                })
+                # Check if it's a launch failure
+                launch_failed = any("Failed to launch app" in w for w in build_result.warnings)
+                if launch_failed:
+                    await notify_clients(project_id, {
+                        "type": status_type,
+                        "message": unique_message + "\n\n⚠️ App built successfully but couldn't launch in simulator. You can manually open it from Xcode.",
+                        "status": "warning",
+                        "project_id": project_id,
+                        "simulator_launched": False,
+                        "warnings": build_result.warnings,
+                        "app_name": actual_app_name
+                    })
+                else:
+                    await notify_clients(project_id, {
+                        "type": status_type,
+                        "message": unique_message,
+                        "status": "success",
+                        "project_id": project_id,
+                        "simulator_launched": False,
+                        "warnings": build_result.warnings,
+                        "app_name": actual_app_name
+                    })
         else:
             await notify_clients(project_id, {
                 "type": "error",
-                "message": "Build failed",
+                "message": "Build failed - attempting automatic fixes...",
                 "status": "failed",
                 "errors": build_result.errors
             })
 
         return {
             "project_id": project_id,
-            "status": "success" if build_result.success else "failed",
+            "app_name": actual_app_name,
+            "bundle_id": correct_bundle_id,  # Return the CORRECT bundle ID
+            "product_name": correct_product_name,
+            "status": final_status,  # success, warning, or failed
             "build_result": build_result.model_dump(),
             "generated_files": generated_code.get("files", []),
+            "features": generated_code.get("features", []),
+            "unique_aspects": generated_code.get("unique_aspects", ""),
             "simulator_launched": getattr(build_result, 'simulator_launched', False) if build_result.success else False
         }
 
@@ -170,6 +270,10 @@ async def generate_app(request: GenerateRequest):
 @app.post("/api/modify")
 async def modify_app(request: ModifyRequest):
     """Modify an existing app based on user request"""
+    print(f"[MODIFY API] Received request: {request.modification}")
+    print(f"[MODIFY API] Project ID: {request.project_id}")
+    print(f"[MODIFY API] Context: {request.context}")
+
     try:
         project_id = request.project_id
 
@@ -182,6 +286,26 @@ async def modify_app(request: ModifyRequest):
         context = project_contexts.get(project_id, {})
         if request.context:
             context.update(request.context)
+
+        # CRITICAL: Get the bundle ID from project metadata, not from context
+        project_metadata_path = os.path.join(project_path, "project.json")
+        if os.path.exists(project_metadata_path):
+            with open(project_metadata_path, 'r') as f:
+                project_metadata = json.load(f)
+                bundle_id = project_metadata.get('bundle_id')
+                product_name = project_metadata.get('product_name')
+        else:
+            # Fallback to context
+            bundle_id = context.get("bundle_id")
+            product_name = context.get("product_name")
+
+        if not bundle_id:
+            # Last resort: generate safe bundle ID
+            from claude_service import ClaudeService
+            temp_service = ClaudeService()
+            bundle_id = temp_service._create_safe_bundle_id(context.get("app_name", "app"))
+
+        print(f"[MAIN] Modifying app with bundle ID: {bundle_id}")
 
         # Create status update callback
         async def send_status_update(message: str):
@@ -200,18 +324,34 @@ async def modify_app(request: ModifyRequest):
             "status": "analyzing"
         })
 
-        # Generate modified code using Claude
-        modified_code = await claude_service.modify_ios_app(
-            context.get("app_name", "MyApp"),
-            context.get("description", ""),
-            request.modification,
-            context.get("edited_files", context.get("generated_files", [])) if context.get("manual_edit") else context.get("generated_files", [])
-        )
+        # Generate modified code using enhanced service if available
+        if use_enhanced_service and enhanced_service:
+            print(f"[MAIN] Using enhanced multi-LLM service for modification")
+            modified_code = await enhanced_service.modify_ios_app_multi_llm(
+                context.get("app_name", "MyApp"),
+                context.get("description", ""),
+                request.modification,
+                context.get("edited_files", context.get("generated_files", [])) if context.get("manual_edit") else context.get("generated_files", []),
+                existing_bundle_id=bundle_id
+            )
+        else:
+            print(f"[MAIN] Using standard Claude service for modification")
+            modified_code = await claude_service.modify_ios_app(
+                context.get("app_name", "MyApp"),
+                context.get("description", ""),
+                request.modification,
+                context.get("edited_files", context.get("generated_files", [])) if context.get("manual_edit") else context.get("generated_files", []),
+                existing_bundle_id=bundle_id
+            )
+
+        # CRITICAL: Ensure the bundle ID remains the same
+        modified_code["bundle_id"] = bundle_id
 
         # Update project context
         context["modifications"].append({
             "request": request.modification,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "modified_by_llm": modified_code.get("modified_by_llm", "claude")
         })
         if "features" in modified_code:
             context["features"].extend(modified_code["features"])
@@ -235,22 +375,51 @@ async def modify_app(request: ModifyRequest):
             "status": "rebuilding"
         })
 
-        # Rebuild the project
-        bundle_id = context.get("bundle_id", f"com.swiftgen.{context.get('app_name', 'app').lower()}")
+        # Rebuild the project with the same bundle ID
+        build_result = await build_service.build_project(project_path, project_id, bundle_id)
 
-        if 'bundle_id' in build_service.build_project.__code__.co_varnames:
-            build_result = await build_service.build_project(project_path, project_id, bundle_id)
-        else:
-            build_result = await build_service.build_project(project_path, project_id)
+        # Determine final status
+        final_status = "failed"
+        status_type = "error"
 
         if build_result.success:
-            await notify_clients(project_id, {
-                "type": "complete",
-                "message": "App modified and relaunched successfully!",
-                "status": "success",
-                "project_id": project_id,
-                "simulator_launched": getattr(build_result, 'simulator_launched', False)
-            })
+            simulator_launched = getattr(build_result, 'simulator_launched', False)
+
+            if simulator_launched:
+                final_status = "success"
+                status_type = "complete"
+            else:
+                final_status = "warning"
+                status_type = "complete"
+
+            if simulator_launched:
+                await notify_clients(project_id, {
+                    "type": status_type,
+                    "message": "✅ App modified and relaunched successfully!",
+                    "status": "success",
+                    "project_id": project_id,
+                    "simulator_launched": True
+                })
+            else:
+                # Check if it's a launch failure
+                launch_failed = any("Failed to launch app" in w for w in build_result.warnings)
+                if launch_failed:
+                    await notify_clients(project_id, {
+                        "type": status_type,
+                        "message": "✅ App modified successfully!\n\n⚠️ The build succeeded but couldn't relaunch in simulator. The app has been updated - you may need to manually launch it.",
+                        "status": "warning",
+                        "project_id": project_id,
+                        "simulator_launched": False,
+                        "warnings": build_result.warnings
+                    })
+                else:
+                    await notify_clients(project_id, {
+                        "type": status_type,
+                        "message": "✅ App modified successfully!",
+                        "status": "success",
+                        "project_id": project_id,
+                        "simulator_launched": False
+                    })
         else:
             await notify_clients(project_id, {
                 "type": "error",
@@ -261,7 +430,9 @@ async def modify_app(request: ModifyRequest):
 
         return {
             "project_id": project_id,
-            "status": "success" if build_result.success else "failed",
+            "bundle_id": bundle_id,
+            "product_name": product_name,
+            "status": final_status,  # success, warning, or failed
             "build_result": build_result.model_dump(),
             "modified_files": modified_code.get("files", []),
             "features_added": modified_code.get("features", [])
@@ -277,6 +448,8 @@ async def list_projects():
     """List all projects"""
     projects = await project_manager.list_projects()
     return projects
+
+@app.get("/api/project/{project_id}/status")
 async def get_project_status(project_id: str):
     """Get current project status"""
     status = await project_manager.get_project_status(project_id)
@@ -303,8 +476,13 @@ async def rebuild_project(project_id: str):
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Get project metadata for bundle ID
-    status = await project_manager.get_project_status(project_id)
-    bundle_id = status.get('bundle_id') if status else None
+    project_metadata_path = os.path.join(project_path, "project.json")
+    bundle_id = None
+
+    if os.path.exists(project_metadata_path):
+        with open(project_metadata_path, 'r') as f:
+            metadata = json.load(f)
+            bundle_id = metadata.get('bundle_id')
 
     # Create status update callback
     async def send_status_update(message: str):
@@ -317,11 +495,8 @@ async def rebuild_project(project_id: str):
     if hasattr(build_service, 'set_status_callback'):
         build_service.set_status_callback(send_status_update)
 
-    # Check if build_service has the new method signature
-    if 'bundle_id' in build_service.build_project.__code__.co_varnames:
-        build_result = await build_service.build_project(project_path, project_id, bundle_id)
-    else:
-        build_result = await build_service.build_project(project_path, project_id)
+    # Always pass bundle_id to build_project
+    build_result = await build_service.build_project(project_path, project_id, bundle_id)
 
     return {"build_result": build_result.model_dump()}
 

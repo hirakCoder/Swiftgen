@@ -48,6 +48,17 @@ class SwiftGenChat {
             }
         });
     }
+    // Add this method to open the code editor
+    openCodeEditor() {
+        if (!this.currentProjectId) {
+            this.addMessage('assistant', 'Please create or load a project first to use the code editor.');
+            return;
+        }
+
+        // Open editor in new tab/window
+        const editorUrl = `/editor.html?project=${this.currentProjectId}`;
+        window.open(editorUrl, '_blank');
+    }
 
     setupTextareaAutoResize() {
         const textarea = document.getElementById('chatInput');
@@ -557,23 +568,29 @@ class SwiftGenChat {
         // Clear existing tabs
         fileTabsContainer.innerHTML = '';
 
-        // Add action buttons
+        // Add action buttons with new Advanced Editor button
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'ml-auto flex items-center space-x-2';
         actionsDiv.innerHTML = `
-            <button onclick="swiftgenChat.startEditMode()" class="px-3 py-1 text-xs bg-dark-surface hover:bg-dark-hover border border-dark-border rounded">
-                <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                </svg>
-                Edit
-            </button>
-            <button onclick="swiftgenChat.exportProject()" class="px-3 py-1 text-xs bg-dark-surface hover:bg-dark-hover border border-dark-border rounded">
-                <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                </svg>
-                Export
-            </button>
-        `;
+        <button onclick="swiftgenChat.openCodeEditor()" class="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center space-x-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
+            </svg>
+            <span>Advanced Editor</span>
+        </button>
+        <button onclick="swiftgenChat.startEditMode()" class="px-3 py-1 text-xs bg-dark-surface hover:bg-dark-hover border border-dark-border rounded">
+            <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+            </svg>
+            Quick Edit
+        </button>
+        <button onclick="swiftgenChat.exportProject()" class="px-3 py-1 text-xs bg-dark-surface hover:bg-dark-hover border border-dark-border rounded">
+            <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            Export
+        </button>
+    `;
 
         // Create tab container
         const tabContainer = document.createElement('div');
@@ -602,58 +619,6 @@ class SwiftGenChat {
             this.selectFile(0);
         }
     }
-
-    selectFile(index) {
-        const tabs = document.querySelectorAll('#fileTabsContainer button[data-file-index]');
-        const codeContent = document.getElementById('codeContent');
-
-        // Update tab styles
-        tabs.forEach((tab, i) => {
-            if (i === index) {
-                tab.className = 'px-4 py-2 text-sm font-medium transition-all text-blue-400 border-b-2 border-blue-400';
-            } else {
-                tab.className = 'px-4 py-2 text-sm font-medium transition-all text-gray-400 hover:text-gray-200';
-            }
-        });
-
-        // Display selected file content
-        const file = this.generatedFiles[index];
-        codeContent.textContent = file.content;
-        this.currentFileIndex = index;
-
-        // If in edit mode, make editable
-        if (this.editingFile !== null) {
-            codeContent.contentEditable = true;
-            codeContent.className = 'text-sm text-gray-300 outline-none';
-        }
-    }
-
-    startEditMode() {
-        const codeContent = document.getElementById('codeContent');
-        const editButton = document.querySelector('button[onclick="swiftgenChat.startEditMode()"]');
-
-        if (this.editingFile === null) {
-            // Enter edit mode
-            this.editingFile = this.currentFileIndex || 0;
-            codeContent.contentEditable = true;
-            codeContent.className = 'text-sm text-gray-300 outline-none';
-            codeContent.focus();
-
-            editButton.innerHTML = `
-                <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
-                Save
-            `;
-            editButton.className = 'px-3 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded';
-
-            this.addMessage('assistant', 'Edit mode enabled. Make your changes and click Save when done.');
-        } else {
-            // Save changes
-            this.saveFileChanges();
-        }
-    }
-
     async saveFileChanges() {
         const codeContent = document.getElementById('codeContent');
         const editButton = document.querySelector('button[onclick="swiftgenChat.startEditMode()"]');
