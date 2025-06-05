@@ -1,0 +1,58 @@
+{
+  "string_literal": [
+    {
+      "pattern": "unterminated string literal",
+      "error_type": "string_literal",
+      "fix_template": "Check for missing quotes",
+      "confidence": 0.99,
+      "examples": [
+        {
+          "error": "unterminated string",
+          "fix": "add quote"
+        },
+        {
+          "error": "/Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/workspaces/proj_fce09fea/Sources/ContentView.swift:12:44: error: unterminated string literal TextField(\"Weight (kg\")\", text: $weightText)",
+          "fix": "{'strategy': '_pattern_based_recovery', 'execution_time': 0.000389}"
+        },
+        {
+          "error": "/Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/workspaces/proj_fce09fea/Sources/ContentView.swift:14:43: error: unterminated string literal TextField(\"Height (m\")\", text: $heightText)",
+          "fix": "{'strategy': '_pattern_based_recovery', 'execution_time': 0.000389}"
+        },
+        {
+          "error": "/Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/workspaces/proj_fce09fea/Sources/ContentView.swift:12:44: error: unterminated string literal TextField(\"Weight (kg\")\", text: $weightText)",
+          "fix": "{'strategy': '_pattern_based_recovery', 'execution_time': 0.000145}"
+        },
+        {
+          "error": "/Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/workspaces/proj_fce09fea/Sources/ContentView.swift:14:43: error: unterminated string literal TextField(\"Height (m\")\", text: $heightText)",
+          "fix": "{'strategy': '_pattern_based_recovery', 'execution_time': 0.000145}"
+        }
+      ]
+    },
+    {
+      "pattern": "multi-line string literal",
+      "error_type": "string_literal",
+      "fix_template": "Fix multi-line string",
+      "confidence": 0.9,
+      "examples": [
+        {
+          "error": "multi-line string",
+          "fix": "use single quotes"
+        }
+      ]
+    }
+  ],
+  "missing_import": [
+    {
+      "pattern": "cannot find .* in scope",
+      "error_type": "missing_import",
+      "fix_template": "Add missing import",
+      "confidence": 0.9,
+      "examples": [
+        {
+          "error": "cannot find View",
+          "fix": "import SwiftUI"
+        }
+      ]
+    }
+  ]
+}
