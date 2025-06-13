@@ -35,6 +35,10 @@ class SwiftSyntaxValidator:
         content, double_quote_fixes = SwiftSyntaxValidator._fix_double_quotes(content)
         fixes_applied.extend(double_quote_fixes)
 
+        # CRITICAL FIX 3: Fix struct initializer mismatches
+        content, init_fixes = SwiftSyntaxValidator._fix_struct_initializers(content)
+        fixes_applied.extend(init_fixes)
+
         # Process line by line for detailed fixes
         lines = content.split('\n')
         fixed_lines = []
@@ -350,6 +354,42 @@ class SwiftSyntaxValidator:
             })
 
         return fixed_files
+
+    @staticmethod
+    def _fix_struct_initializers(content: str) -> Tuple[str, List[str]]:
+        """Fix common struct initializer mismatches"""
+        fixes = []
+        
+        # Common patterns where LLMs get initializers wrong
+        patterns = [
+            # BirthdayReminder with id parameter when id has default value
+            (r'BirthdayReminder\(id:\s*UUID\(\),\s*([^)]+)\)',
+             r'BirthdayReminder(\1)',
+             "Fixed BirthdayReminder initializer (removed id parameter)"),
+            
+            # Similar pattern for any struct with id: UUID() default
+            (r'(\w+)\(id:\s*UUID\(\),\s*([^)]+)\)',
+             r'\1(\2)',
+             "Fixed struct initializer (removed default id parameter)"),
+             
+            # TodoItem with id parameter when id has default value
+            (r'TodoItem\(id:\s*UUID\(\),\s*([^)]+)\)',
+             r'TodoItem(\1)',
+             "Fixed TodoItem initializer (removed id parameter)"),
+             
+            # UserTask with id parameter when id has default value  
+            (r'UserTask\(id:\s*UUID\(\),\s*([^)]+)\)',
+             r'UserTask(\1)',
+             "Fixed UserTask initializer (removed id parameter)"),
+        ]
+        
+        for pattern, replacement, description in patterns:
+            new_content = re.sub(pattern, replacement, content)
+            if new_content != content:
+                fixes.append(description)
+                content = new_content
+        
+        return content, fixes
 
 
 def test_validator():

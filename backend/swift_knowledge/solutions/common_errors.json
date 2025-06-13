@@ -1,0 +1,16 @@
+{
+  "title": "Common Swift Build Errors and Solutions",
+  "content": "\n                    Solutions for frequent build errors:\n                    \n                    1. \"Cannot find type 'Task' in scope\"\n                    - Solution: Task is a reserved Swift type. Use TodoItem, UserTask, or WorkItem instead\n                    \n                    2. \"Single-quoted string literal found\"\n                    - Solution: Replace all single quotes ' with double quotes \"\n                    - Example: Text('Hello') \u2192 Text(\"Hello\")\n                    \n                    3. \"Value of type 'Environment<Binding<PresentationMode>>' has no member 'dismiss'\"\n                    - Solution: Use @Environment(\\.dismiss) instead of presentationMode\n                    \n                    4. \"NavigationView is deprecated\"\n                    - Solution: Use NavigationStack for iOS 16+\n                    \n                    5. \"Missing argument for parameter in call\"\n                    - Check all function calls have required parameters\n                    - Ensure proper initialization of structs/classes\n                    \n                    6. \"Cannot convert value of type\"\n                    - Check type compatibility\n                    - Use proper type casting or conversion\n                ",
+  "tags": [
+    "errors",
+    "build-errors",
+    "solutions",
+    "debugging"
+  ],
+  "severity": "critical",
+  "solutions": [
+    "Always check for reserved type conflicts",
+    "Use consistent quote style (double quotes)",
+    "Update to modern SwiftUI APIs"
+  ]
+}

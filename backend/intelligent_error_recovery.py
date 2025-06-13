@@ -61,6 +61,8 @@ class IntelligentErrorRecovery:
             "string_literal": [],
             "import_missing": [],
             "type_not_found": [],
+            "type_error": [],
+            "protocol_conformance": [],
             "syntax": [],
             "other": []
         }
@@ -68,6 +70,9 @@ class IntelligentErrorRecovery:
         for error in errors:
             if "unterminated string literal" in error:
                 analysis["string_literal"].append(error)
+            elif "conform to" in error and ("Codable" in error or "Decodable" in error or "Encodable" in error):
+                analysis["protocol_conformance"].append(error)
+                analysis["type_error"].append(error)
             elif "cannot find" in error and ("type" in error or "in scope" in error):
                 analysis["import_missing"].append(error)
             elif "expected" in error or "syntax" in error.lower():
@@ -249,17 +254,22 @@ class IntelligentErrorRecovery:
     
     def _fix_import_errors(self, errors: List[str], swift_files: List[Dict], 
                           error_analysis: Dict) -> Tuple[bool, List[Dict]]:
-        """Fix missing import errors"""
+        """Fix missing import and type errors"""
         
-        if "import_missing" not in error_analysis:
+        if "import_missing" not in error_analysis and "type_not_found" not in error_analysis:
             return False, swift_files
         
-        print("Fixing missing imports...")
+        print("Fixing missing imports and types...")
         modified_files = []
+        any_fixed = False
+        
+        # Check for PersistenceController errors
+        has_persistence_error = any("PersistenceController" in error or "managedObjectContext" in error 
+                                  for error in error_analysis.get("import_missing", []) + error_analysis.get("type_not_found", []))
         
         # Determine which imports are needed
         needed_imports = set()
-        for error in error_analysis["import_missing"]:
+        for error in error_analysis.get("import_missing", []):
             if "Scene" in error or "App" in error or "View" in error:
                 needed_imports.add("SwiftUI")
             if "ObservableObject" in error or "Published" in error:
@@ -267,29 +277,114 @@ class IntelligentErrorRecovery:
             if "UUID" in error:
                 needed_imports.add("Foundation")
         
-        # Add imports to files
+        # Process files
         for file in swift_files:
             content = file["content"]
             modified_content = content
+            file_modified = False
             
             # Add missing imports at the beginning
             for imp in needed_imports:
                 if f"import {imp}" not in content:
                     modified_content = f"import {imp}\n" + modified_content
+                    file_modified = True
+            
+            # Handle PersistenceController errors by removing Core Data references
+            if has_persistence_error:
+                if "PersistenceController" in modified_content or "managedObjectContext" in modified_content or "CoreData" in modified_content:
+                    # Remove Core Data import
+                    modified_content = re.sub(r'import CoreData\s*\n', '', modified_content)
+                    
+                    # Remove PersistenceController property declarations with various formats
+                    modified_content = re.sub(r'(private\s+)?let\s+persistenceController\s*=\s*PersistenceController[^\n]*\n', '', modified_content)
+                    
+                    # Remove .environment modifiers with managedObjectContext
+                    modified_content = re.sub(r'\.environment\(\\\.managedObjectContext[^)]*\)\s*', '', modified_content)
+                    
+                    # Remove @Environment property wrappers for managedObjectContext
+                    modified_content = re.sub(r'@Environment\(\\\.managedObjectContext\)\s*(?:private\s+)?var\s+\w+\s*:\s*NSManagedObjectContext\s*\n', '', modified_content)
+                    
+                    # Remove @FetchRequest property wrappers with multiline support
+                    modified_content = re.sub(r'@FetchRequest\([^}]*\}\s*(?:private\s+)?var\s+\w+\s*:[^\n]*\n', '', modified_content, flags=re.MULTILINE | re.DOTALL)
+                    
+                    # Remove preview environment setup
+                    modified_content = re.sub(r'\.environment\(\\\.managedObjectContext[^)]*PersistenceController[^)]*\)', '', modified_content)
+                    
+                    if modified_content != content:
+                        file_modified = True
+                        print(f"  Removed Core Data references from {file['path']}")
+            
+            if file_modified:
+                any_fixed = True
             
             modified_files.append({
                 "path": file["path"],
                 "content": modified_content
             })
         
-        return True, modified_files
+        return any_fixed, modified_files
     
     def _fix_type_errors(self, errors: List[str], swift_files: List[Dict], 
                         error_analysis: Dict) -> Tuple[bool, List[Dict]]:
-        """Fix type-related errors"""
+        """Fix type-related errors including protocol conformance"""
         
-        # This would handle type mismatches, protocol conformance, etc.
-        return False, swift_files
+        if "type_error" not in error_analysis and "protocol_conformance" not in error_analysis:
+            return False, swift_files
+        
+        print("Fixing type errors...")
+        modified_files = []
+        any_fixed = False
+        
+        # Check for Codable conformance errors
+        codable_errors = []
+        for error in errors:
+            if "conform to 'Decodable'" in error or "conform to 'Encodable'" in error or "conform to 'Codable'" in error:
+                # Extract the type that needs conformance
+                import re
+                match = re.search(r"'(\w+)' conform to", error)
+                if match:
+                    type_name = match.group(1)
+                    codable_errors.append(type_name)
+        
+        for file in swift_files:
+            content = file["content"]
+            modified = False
+            
+            # Fix Codable conformance
+            for type_name in codable_errors:
+                # Find struct/class definition
+                patterns = [
+                    f"struct {type_name}:",
+                    f"struct {type_name} :",
+                    f"class {type_name}:",
+                    f"class {type_name} :"
+                ]
+                
+                for pattern in patterns:
+                    if pattern in content:
+                        # Check if already has Codable
+                        if "Codable" not in content:
+                            # Add Codable conformance
+                            if ": Identifiable" in content:
+                                content = content.replace(f"{type_name}: Identifiable", f"{type_name}: Identifiable, Codable")
+                            elif ":" in pattern:
+                                # Has other conformances
+                                content = content.replace(pattern, pattern[:-1] + ", Codable:")
+                            else:
+                                # No conformances yet
+                                content = content.replace(f"struct {type_name}", f"struct {type_name}: Codable")
+                                content = content.replace(f"class {type_name}", f"class {type_name}: Codable")
+                            modified = True
+                            any_fixed = True
+                            print(f"Added Codable conformance to {type_name}")
+                        break
+            
+            modified_files.append({
+                "path": file["path"],
+                "content": content
+            })
+        
+        return any_fixed, modified_files
     
     def _fix_syntax_errors(self, errors: List[str], swift_files: List[Dict], 
                           error_analysis: Dict) -> Tuple[bool, List[Dict]]:
@@ -383,8 +478,21 @@ CRITICAL INSTRUCTIONS:
    - SwiftUI apps need: import SwiftUI
    - Use Foundation for basic types
 
-3. Focus ONLY on fixing the errors shown
-4. Return the complete, corrected code
+3. For PersistenceController/Core Data errors:
+   - If the app doesn't need Core Data, remove ALL references:
+     * Remove 'import CoreData'
+     * Remove 'let persistenceController = PersistenceController()'
+     * Remove '.environment(\\.managedObjectContext, ...)'
+     * Remove '@Environment(\\.managedObjectContext)' from views
+     * Remove '@FetchRequest' property wrappers
+
+4. For Codable/Decodable/Encodable errors:
+   - Add protocol conformance to the type: struct MyType: Codable { ... }
+   - If type already has conformances: struct MyType: Identifiable, Codable { ... }
+   - Import Foundation if not already imported
+
+5. Focus ONLY on fixing the errors shown
+6. Return the complete, corrected code
 
 EXAMPLE FIXES:
 Wrong: .navigationTitle(\"Matches\")

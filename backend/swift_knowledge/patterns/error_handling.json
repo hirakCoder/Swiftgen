@@ -1,0 +1,16 @@
+{
+  "title": "Swift Error Handling Best Practices",
+  "content": "\n                    Proper error handling patterns:\n                    \n                    1. Define custom errors:\n                    enum AppError: LocalizedError {\n                        case networkError(String)\n                        case validationError(String)\n                        case unknownError\n                        \n                        var errorDescription: String? {\n                            switch self {\n                            case .networkError(let message):\n                                return \"Network Error: \\(message)\"\n                            case .validationError(let message):\n                                return \"Validation Error: \\(message)\"\n                            case .unknownError:\n                                return \"An unknown error occurred\"\n                            }\n                        }\n                    }\n                    \n                    2. Use Result type:\n                    func fetchData() async -> Result<[TodoItem], AppError> {\n                        do {\n                            let items = try await api.fetchTodos()\n                            return .success(items)\n                        } catch {\n                            return .failure(.networkError(error.localizedDescription))\n                        }\n                    }\n                    \n                    3. Handle in UI:\n                    @State private var errorMessage: String?\n                    @State private var showError = false\n                    \n                    .alert(\"Error\", isPresented: $showError) {\n                        Button(\"OK\") { }\n                    } message: {\n                        Text(errorMessage ?? \"Unknown error\")\n                    }\n                ",
+  "tags": [
+    "error-handling",
+    "Result",
+    "LocalizedError",
+    "best-practices"
+  ],
+  "severity": "important",
+  "solutions": [
+    "Always use Result type for operations that can fail",
+    "Provide user-friendly error messages",
+    "Never force unwrap optionals"
+  ]
+}

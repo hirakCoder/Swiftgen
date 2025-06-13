@@ -1,79 +1,122 @@
 import os
-import subprocess
 import asyncio
+import re
+from typing import Dict, List, Optional, Tuple
+import subprocess
 import json
-from typing import Dict, List, Tuple, Optional
 from datetime import datetime
+import shutil
+
 from models import BuildStatus, BuildResult
 
+# Import error recovery system
+try:
+    from robust_error_recovery_system import RobustErrorRecoverySystem
+    from claude_service import ClaudeService
+    from enhanced_claude_service import EnhancedClaudeService
+except ImportError as e:
+    print(f"Warning: Could not import recovery systems: {e}")
+    RobustErrorRecoverySystem = None
+    ClaudeService = None
+    EnhancedClaudeService = None
+
+# Import simulator service
+try:
+    from simulator_service import SimulatorService, SimulatorState
+except ImportError:
+    print("Warning: SimulatorService not available")
+    SimulatorService = None
+    SimulatorState = None
+
+
+def fix_naming_consistency_in_project_yml(project_path: str):
+    """Fix naming consistency issues in project.yml before building"""
+    try:
+        import yaml
+
+        project_yml_path = os.path.join(project_path, "project.yml")
+        project_json_path = os.path.join(project_path, "project.json")
+
+        if not os.path.exists(project_yml_path) or not os.path.exists(project_json_path):
+            return
+
+        # Get the app name from project.json
+        with open(project_json_path, 'r') as f:
+            metadata = json.load(f)
+            app_name = metadata.get('app_name', 'App')
+
+        # Read project.yml
+        with open(project_yml_path, 'r') as f:
+            content = f.read()
+
+        # Create consistent names
+        display_name = app_name.strip()  # "Cool Timer"
+        product_name = ''.join(display_name.split())  # "CoolTimer"
+
+        # Fix all occurrences
+        # 1. Fix PRODUCT_NAME to have no spaces
+        content = re.sub(
+            r'(PRODUCT_NAME:\s*["\']?)([^"\'\n]+)(["\']?)',
+            f'\\1{product_name}\\3',
+            content
+        )
+
+        # 2. Ensure display name is consistent
+        content = re.sub(
+            r'(INFOPLIST_KEY_CFBundleDisplayName:\s*["\']?)([^"\'\n]+)(["\']?)',
+            f'\\1{display_name}\\3',
+            content
+        )
+
+        # Write back
+        with open(project_yml_path, 'w') as f:
+            f.write(content)
+
+        # Logging handled by caller
+
+    except Exception as e:
+        # Warning logged silently
+        pass
+
+
 class BuildService:
+    """Build service with intelligent error recovery and simulator support"""
+
     def __init__(self):
-        # Use absolute path for build logs
+        self.max_attempts = 3  # Allow enough attempts for recovery
+        self.status_callback = None
         self.backend_dir = os.path.dirname(os.path.abspath(__file__))
-        self.workspaces_dir = os.path.abspath(os.path.join(self.backend_dir, "..", "workspaces"))
-        self.build_logs_dir = os.path.join(self.workspaces_dir, "build_logs")
+        self.build_logs_dir = os.path.join(self.backend_dir, "build_logs")
         os.makedirs(self.build_logs_dir, exist_ok=True)
 
-        # Try to import SimulatorService
+        # Initialize simulator service if available
+        self.simulator_service = SimulatorService() if SimulatorService else None
+
+        # Initialize error recovery system
+        self.error_recovery_system = None
+        self.claude_service = None
+
         try:
-            from simulator_service import SimulatorService
-            self.simulator_service = SimulatorService()
-        except ImportError:
-            print("Warning: simulator_service not available. Simulator launch disabled.")
-            self.simulator_service = None
+            if RobustErrorRecoverySystem:
+                # Try to use enhanced service if available
+                if EnhancedClaudeService:
+                    self.claude_service = EnhancedClaudeService()
+                elif ClaudeService:
+                    self.claude_service = ClaudeService()
 
-        # Import ClaudeService for intelligent error recovery
-        try:
-            from claude_service import ClaudeService
-            self.claude_service = ClaudeService()
-            self.has_ai_recovery = True
-        except ImportError:
-            print("Warning: claude_service not available. Auto-fix disabled.")
-            self.claude_service = None
-            self.has_ai_recovery = False
-
-        # Initialize robust error recovery system with ALL LLMs
-        self._init_error_recovery()
-
-        self.status_callback = None
-        self.max_retry_attempts = 3
-
-    def _init_error_recovery(self):
-        """Initialize the robust multi-model error recovery system with all available LLMs"""
-        try:
-            # Import the new robust recovery system
-            from robust_error_recovery_system import create_intelligent_recovery_system
-
-            # Get API keys from environment
-            openai_key = os.getenv("OPENAI_API_KEY")
-            xai_key = os.getenv("XAI_API_KEY")
-
-            # Log which services are available
-            available_services = []
-            if self.claude_service:
-                available_services.append("Claude")
-            if openai_key:
-                available_services.append("GPT-4")
-            if xai_key:
-                available_services.append("xAI/Grok")
-
-            # Create the recovery system with all available LLMs
-            self.error_recovery_system = create_intelligent_recovery_system(
-                claude_service=self.claude_service,
-                openai_key=openai_key,
-                xai_key=xai_key
-            )
-
-            if available_services:
-                print(f"✓ Robust multi-model error recovery system initialized with: {', '.join(available_services)}")
+                if self.claude_service:
+                    self.error_recovery_system = RobustErrorRecoverySystem(
+                        claude_service=self.claude_service,
+                        openai_key=os.getenv("OPENAI_API_KEY"),
+                        xai_key=os.getenv("XAI_API_KEY")
+                    )
+                    print("✓ Robust error recovery system initialized")
+                else:
+                    print("⚠️ Claude service not available - error recovery limited")
             else:
-                print("⚠️  No AI services available for error recovery")
-
-        except ImportError:
-            print("Warning: Robust error recovery system not available")
-            self.error_recovery_system = None
+                print("⚠️ Robust error recovery system not available")
         except Exception as e:
-            print(f"Error initializing recovery system: {e}")
+            print(f"⚠️ Could not initialize error recovery: {e}")
             self.error_recovery_system = None
 
     def set_status_callback(self, callback):
@@ -83,702 +126,456 @@ class BuildService:
     async def _update_status(self, message: str):
         """Send status update if callback is set"""
         if self.status_callback:
-            await self.status_callback(message)
-        print(f"[BUILD STATUS] {message}")
-
-    async def build_project(self, project_path: str, project_id: str, bundle_id: Optional[str] = None) -> BuildResult:
-        """Build iOS project with intelligent error recovery"""
-
-        if not os.path.isabs(project_path):
-            project_path = os.path.abspath(os.path.join(self.backend_dir, project_path))
-
-        build_log_path = os.path.join(self.build_logs_dir, f"{project_id}_build.log")
-
-        # CRITICAL: Verify source files exist before building
-        sources_dir = os.path.join(project_path, "Sources")
-        if os.path.exists(sources_dir):
-            swift_files = [f for f in os.listdir(sources_dir) if f.endswith('.swift')]
-            print(f"[BUILD] Found {len(swift_files)} Swift files in Sources: {swift_files}")
-
-            if not swift_files:
-                return BuildResult(
-                    success=False,
-                    errors=["No Swift source files found in Sources directory"],
-                    warnings=[],
-                    build_time=0,
-                    log_path=build_log_path
-                )
-        else:
-            return BuildResult(
-                success=False,
-                errors=["Sources directory not found"],
-                warnings=[],
-                build_time=0,
-                log_path=build_log_path
-            )
-
-        # Generate Xcode project first
-        await self._update_status("Generating Xcode project...")
-        gen_result = await self._run_xcodegen(project_path)
-        if not gen_result[0]:
-            return BuildResult(
-                success=False,
-                errors=[f"Failed to generate Xcode project: {gen_result[1]}"],
-                warnings=[],
-                build_time=0,
-                log_path=build_log_path
-            )
-
-        # Clean build folder
-        await self._update_status("Cleaning build folder...")
-        await self._clean_build(project_path)
-
-        # Build with intelligent retry
-        start_time = datetime.now()
-
-        for attempt in range(self.max_retry_attempts):
-            await self._update_status(f"Building app (attempt {attempt + 1}/{self.max_retry_attempts})...")
-
-            success, output, errors = await self._run_xcodebuild(project_path)
-
-            # Save build log
-            with open(build_log_path, 'a') as f:
-                f.write(f"\n\n=== BUILD ATTEMPT {attempt + 1} ===\n")
-                f.write(output)
-                if errors:
-                    f.write("\n\nERRORS:\n")
-                    f.write("\n".join(errors))
-
-            if success:
-                # Build succeeded!
-                build_time = (datetime.now() - start_time).total_seconds()
-                return await self._handle_successful_build(
-                    project_path, project_id, bundle_id, build_log_path,
-                    build_time, output
-                )
-            else:
-                # Build failed - attempt intelligent recovery
-                if attempt < self.max_retry_attempts - 1:
-                    await self._update_status("Build failed. Analyzing errors and applying AI fixes...")
-
-                    fixed = await self._intelligent_error_recovery(
-                        project_path, project_id, errors, output
-                    )
-
-                    if fixed:
-                        await self._update_status("Applied AI-generated fixes. Rebuilding...")
-                        continue
-                    else:
-                        await self._update_status("AI fix didn't resolve all issues. Trying alternative approach...")
-                else:
-                    # Final attempt failed
-                    build_time = (datetime.now() - start_time).total_seconds()
-                    return BuildResult(
-                        success=False,
-                        errors=errors[:5],  # Limit errors shown
-                        warnings=self._parse_warnings(output),
-                        build_time=build_time,
-                        log_path=build_log_path
-                    )
-
-        # Should never reach here
-        return BuildResult(
-            success=False,
-            errors=["Max retry attempts reached"],
-            warnings=[],
-            build_time=(datetime.now() - start_time).total_seconds(),
-            log_path=build_log_path
-        )
-
-    async def _intelligent_error_recovery(self, project_path: str, project_id: str,
-                                          errors: List[str], build_output: str) -> bool:
-        """Use the robust multi-model error recovery system"""
-
-        # First try the new robust system if available
-        if self.error_recovery_system:
             try:
-                # Get all Swift files
-                swift_files = []
-                sources_dir = os.path.join(project_path, "Sources")
-
-                if os.path.exists(sources_dir):
-                    for file in os.listdir(sources_dir):
-                        if file.endswith('.swift'):
-                            file_path = os.path.join(sources_dir, file)
-                            try:
-                                with open(file_path, 'r', encoding='utf-8') as f:
-                                    content = f.read()
-                                swift_files.append({
-                                    "path": f"Sources/{file}",
-                                    "content": content
-                                })
-                            except Exception as e:
-                                print(f"Error reading {file}: {e}")
-
-                if not swift_files:
-                    print("No Swift files found for recovery")
-                    return False
-
-                # Use the robust recovery system
-                await self._update_status("Analyzing build errors with multi-model system...")
-                fixed, modified_files = await self.error_recovery_system.recover_from_errors(
-                    errors, swift_files, project_path
-                )
-
-                if fixed:
-                    # Apply the fixes
-                    await self._update_status("Applying intelligent fixes...")
-                    for file_info in modified_files:
-                        file_path = os.path.join(project_path, file_info["path"])
-                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(file_info["content"])
-
-                    return True
-
+                await self.status_callback(message)
             except Exception as e:
-                print(f"Error in robust recovery system: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                # Fall back to original Claude recovery
+                print(f"Error in status callback: {e}")
 
-        # Fallback to original Claude-based recovery
-        if self.claude_service:
-            return await self._original_claude_recovery(project_path, project_id, errors, build_output)
+    async def build_project(self, project_path: str, project_id: str, bundle_id: str) -> BuildResult:
+        """Build iOS project with multiple recovery strategies"""
 
-        return False
+        start_time = datetime.now()
+        errors = []
+        warnings = []
+        build_log = []
+        
+        # Create log file path for this build
+        log_filename = f"proj_{project_id}_build.log"
+        log_path = os.path.join(self.build_logs_dir, log_filename)
+        
+        # Initialize log file
+        with open(log_path, 'w') as f:
+            f.write(f"Build Log for Project: {project_id}\n")
+            f.write(f"Bundle ID: {bundle_id}\n")
+            f.write(f"Started: {start_time}\n")
+            f.write("-" * 50 + "\n")
 
-    async def _original_claude_recovery(self, project_path: str, project_id: str,
-                                        errors: List[str], build_output: str) -> bool:
-        """Original Claude-based recovery as fallback"""
+        # Verify project structure
+        sources_dir = os.path.join(project_path, "Sources")
+        if not os.path.exists(sources_dir):
+            return BuildResult(
+                success=False,
+                errors=[f"Sources directory not found at {sources_dir}"],
+                warnings=[],
+                build_time=(datetime.now() - start_time).total_seconds(),
+                app_path=None,
+                log_path=log_path
+            )
 
-        try:
-            # Get all Swift files
-            swift_files = []
-            sources_dir = os.path.join(project_path, "Sources")
-
-            if os.path.exists(sources_dir):
-                for file in os.listdir(sources_dir):
-                    if file.endswith('.swift'):
-                        file_path = os.path.join(sources_dir, file)
-                        with open(file_path, 'r') as f:
-                            content = f.read()
+        # Get Swift files recursively from all subdirectories
+        swift_files = []
+        for root, dirs, files in os.walk(sources_dir):
+            for filename in files:
+                if filename.endswith('.swift'):
+                    file_path = os.path.join(root, filename)
+                    # Calculate relative path from project root
+                    relative_path = os.path.relpath(file_path, project_path)
+                    with open(file_path, 'r') as f:
                         swift_files.append({
-                            "path": f"Sources/{file}",
-                            "content": content
+                            "path": relative_path,
+                            "content": f.read()
                         })
 
-            # Create intelligent error recovery prompt
-            prompt = self._create_error_recovery_prompt(errors, swift_files, build_output)
+        await self._update_status(f"Found {len(swift_files)} Swift files in project")
 
-            # Get AI fix
-            await self._update_status("Requesting AI analysis of build errors...")
+        if not swift_files:
+            return BuildResult(
+                success=False,
+                errors=["No Swift files found in Sources directory"],
+                warnings=[],
+                build_time=(datetime.now() - start_time).total_seconds(),
+                app_path=None,
+                log_path=log_path if 'log_path' in locals() else None
+            )
 
-            # Call Claude API directly for error fixing
-            response = await self._call_claude_for_fixes(prompt)
-
-            if response and "files" in response:
-                # Apply the fixes
-                await self._update_status("Applying AI-generated code fixes...")
-
-                for file_info in response["files"]:
-                    file_path = os.path.join(project_path, file_info["path"])
-                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-                    with open(file_path, 'w') as f:
-                        f.write(file_info["content"])
-
-                fixes_applied = response.get('fixes_applied', ['Applied AI fixes'])
-                print(f"AI Fixes applied: {fixes_applied}")
-
-                return True
-            else:
-                print("AI couldn't generate fixes")
-                return False
-
-        except Exception as e:
-            print(f"Error in Claude recovery: {str(e)}")
-            return False
-
-    def _create_error_recovery_prompt(self, errors: List[str], swift_files: List[Dict],
-                                      build_output: str) -> str:
-        """Create a sophisticated prompt for error recovery"""
-
-        # Extract the most relevant part of build output
-        relevant_output = self._extract_relevant_build_output(build_output, errors)
-
-        errors_text = '\n'.join(errors)
-        code_sections = []
-        for f in swift_files:
-            code_sections.append(f"File: {f['path']}\n```swift\n{f['content']}\n```")
-        code_context = '\n\n'.join(code_sections)
-
-        # Analyze common error patterns
-        error_hints = []
-        if "cannot find type" in errors_text or "cannot find" in errors_text:
-            error_hints.append("Missing imports - ensure all necessary frameworks are imported (SwiftUI, Foundation, etc.)")
-        if "@main" in errors_text:
-            error_hints.append("Main app struct issues - ensure proper App protocol conformance")
-        if "error:" in errors_text and ".swift:" in errors_text:
-            error_hints.append("Syntax errors - check for proper Swift syntax")
-
-        prompt = f"""You are an expert iOS developer. Fix these Swift compilation errors:
-
-BUILD ERRORS:
-{errors_text}
-
-ERROR ANALYSIS HINTS:
-{chr(10).join(error_hints) if error_hints else "No specific patterns detected"}
-
-RELEVANT BUILD OUTPUT:
-{relevant_output}
-
-CURRENT CODE FILES:
-{code_context}
-
-REQUIREMENTS:
-1. Analyze each error carefully - understand the ROOT CAUSE
-2. Common issues to check:
-   - Missing imports (ALWAYS import SwiftUI for SwiftUI apps)
-   - Typos in type names or method calls
-   - Missing protocol conformance
-   - Incorrect syntax
-   - Missing closing braces
-3. Provide COMPLETE fixed code (not snippets)
-4. Ensure all Swift syntax is correct
-5. Follow iOS 16+ and SwiftUI best practices
-6. Make minimal changes to fix the errors
-7. Preserve all existing functionality
-
-CRITICAL: Many errors are caused by missing imports. ENSURE:
-- Every SwiftUI file starts with: import SwiftUI
-- App main files have proper structure
-- All necessary frameworks are imported
-
-Return ONLY a JSON object:
-{{
-    "files": [
-        {{
-            "path": "Sources/filename.swift",
-            "content": "// Complete FIXED Swift code with all imports"
-        }}
-        // Include ALL files that need fixes
-    ],
-    "fixes_applied": [
-        "Added missing SwiftUI import",
-        "Fixed App protocol conformance",
-        // List each specific fix
-    ],
-    "explanation": "Brief explanation of what was wrong"
-}}"""
-
-        return prompt
-
-    def _extract_relevant_build_output(self, build_output: str, errors: List[str]) -> str:
-        """Extract relevant parts of build output around errors"""
-
-        lines = build_output.split('\n')
-        relevant_lines = []
-
-        for error in errors[:3]:  # Focus on first 3 errors
-            # Find error in output and get context
-            for i, line in enumerate(lines):
-                if error in line:
-                    # Get 5 lines before and after
-                    start = max(0, i - 5)
-                    end = min(len(lines), i + 6)
-                    relevant_lines.extend(lines[start:end])
-                    relevant_lines.append("---")
-                    break
-
-        return '\n'.join(relevant_lines[:100])  # Limit size
-
-    async def _call_claude_for_fixes(self, prompt: str) -> Optional[Dict]:
-        """Call Claude API for error fixes"""
-
-        if not self.claude_service:
-            return None
-
-        try:
-            # Use the claude service's internal method
-            response = await self.claude_service._call_claude_api(prompt)
-            return response
-        except Exception as e:
-            print(f"Error calling Claude for fixes: {str(e)}")
-            return None
-
-    async def _handle_successful_build(self, project_path: str, project_id: str,
-                                       bundle_id: Optional[str], build_log_path: str,
-                                       build_time: float, output: str) -> BuildResult:
-        """Handle successful build and launch simulator"""
-
-        warnings = self._parse_warnings(output)
-        app_path = self._get_app_path(project_path)
-
-        if app_path and self.simulator_service:
-            await self._update_status("Build successful! Preparing simulator...")
-
-            if not bundle_id:
-                bundle_id = self._get_bundle_id_from_project(project_path)
-
-            if bundle_id:
-                await self._update_status("Booting simulator...")
-                simulator_ready, _, sim_message = await self.simulator_service.ensure_simulator_booted()
-
-                if simulator_ready:
-                    await self._update_status("Installing and launching app...")
-                    launch_success, launch_message = await self.simulator_service.install_and_launch_app(
-                        app_path,
-                        bundle_id,
-                        self._update_status
-                    )
-
-                    if launch_success:
-                        await self._update_status("✅ App launched successfully in simulator!")
-                        return BuildResult(
-                            success=True,
-                            errors=[],
-                            warnings=warnings,
-                            build_time=build_time,
-                            log_path=build_log_path,
-                            app_path=app_path,
-                            simulator_launched=True,
-                            simulator_message=launch_message
-                        )
-                    else:
-                        warnings.append(f"Failed to launch app: {launch_message}")
-                else:
-                    warnings.append(f"Failed to boot simulator: {sim_message}")
-            else:
-                warnings.append("Could not determine bundle ID for app launch")
-
-        return BuildResult(
-            success=True,
-            errors=[],
-            warnings=warnings,
-            build_time=build_time,
-            log_path=build_log_path,
-            app_path=app_path if app_path else None,
-            simulator_launched=False
-        )
-
-    # Keep all the existing helper methods from the original build_service.py
-    def _get_bundle_id_from_project(self, project_path: str) -> Optional[str]:
-        """Extract bundle ID from project files"""
-        project_json_path = os.path.join(project_path, "project.json")
-        if os.path.exists(project_json_path):
-            try:
-                with open(project_json_path, 'r') as f:
-                    data = json.load(f)
-                    bundle_id = data.get('bundle_id')
-                    if bundle_id:
-                        return bundle_id
-            except:
-                pass
-
+        # Ensure we have project.yml
         project_yml_path = os.path.join(project_path, "project.yml")
-        if os.path.exists(project_yml_path):
-            try:
-                import yaml
-                with open(project_yml_path, 'r') as f:
-                    data = yaml.safe_load(f)
-                    for target_name, target_data in data.get('targets', {}).items():
-                        settings = target_data.get('settings', {}).get('base', {})
-                        bundle_id = settings.get('PRODUCT_BUNDLE_IDENTIFIER')
-                        if bundle_id:
-                            return bundle_id
-            except:
-                pass
-
-        return None
-
-    async def _run_xcodegen(self, project_path: str) -> Tuple[bool, str]:
-        """Run xcodegen to create Xcode project"""
-        try:
-            check_process = await asyncio.create_subprocess_exec(
-                'which', 'xcodegen',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+        if not os.path.exists(project_yml_path):
+            await self._update_status("❌ project.yml not found")
+            return BuildResult(
+                success=False,
+                errors=["project.yml not found"],
+                warnings=[],
+                build_time=(datetime.now() - start_time).total_seconds(),
+                app_path=None,
+                log_path=log_path if 'log_path' in locals() else None
             )
-            stdout, stderr = await check_process.communicate()
 
-            if check_process.returncode != 0:
-                return False, "xcodegen not found. Please install it: brew install xcodegen"
+        # Validate Swift syntax first
+        await self._update_status("🔍 Validating Swift syntax...")
+        syntax_errors = self._validate_swift_syntax(swift_files)
+        if syntax_errors:
+            errors.extend(syntax_errors)
+            warnings.append(f"Found {len(syntax_errors)} syntax errors")
 
-            process = await asyncio.create_subprocess_exec(
-                'xcodegen', 'generate',
+        # Fix naming consistency
+        fix_naming_consistency_in_project_yml(project_path)
+
+        # Generate Xcode project
+        await self._update_status("🔧 Generating Xcode project...")
+        try:
+            result = subprocess.run(
+                ["xcodegen", "generate"],
                 cwd=project_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                capture_output=True,
+                text=True,
+                timeout=30
             )
 
-            stdout, stderr = await process.communicate()
+            if result.returncode != 0:
+                error_msg = f"XcodeGen failed: {result.stderr}"
+                await self._update_status(error_msg)
+                errors.append(error_msg)
+                return BuildResult(
+                    success=False,
+                    errors=errors,
+                    warnings=warnings,
+                    build_time=(datetime.now() - start_time).total_seconds(),
+                    app_path=None,
+                    log_path=log_path if 'log_path' in locals() else None
+                )
 
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
-                print(f"xcodegen error: {error_msg}")
-                return False, error_msg
-
-            print(f"xcodegen output: {stdout.decode()}")
-            return True, stdout.decode()
-
-        except FileNotFoundError:
-            return False, "xcodegen not found. Please install it: brew install xcodegen"
+        except subprocess.TimeoutExpired:
+            errors.append("XcodeGen timed out")
+            return BuildResult(
+                success=False,
+                errors=errors,
+                warnings=warnings,
+                build_time=(datetime.now() - start_time).total_seconds(),
+                app_path=None,
+                log_path=log_path if 'log_path' in locals() else None
+            )
         except Exception as e:
-            return False, f"xcodegen error: {str(e)}"
-
-    async def _clean_build(self, project_path: str):
-        """Clean build artifacts"""
-        derived_data_path = os.path.join(project_path, "DerivedData")
-        if os.path.exists(derived_data_path):
-            subprocess.run(['rm', '-rf', derived_data_path])
-
-    async def _get_available_simulators(self) -> List[str]:
-        """Get list of available iOS simulators"""
-        try:
-            cmd = ['xcrun', 'simctl', 'list', 'devices', 'available', '-j']
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            errors.append(f"XcodeGen error: {str(e)}")
+            return BuildResult(
+                success=False,
+                errors=errors,
+                warnings=warnings,
+                build_time=(datetime.now() - start_time).total_seconds(),
+                app_path=None,
+                log_path=log_path if 'log_path' in locals() else None
             )
-            stdout, stderr = await process.communicate()
 
-            if process.returncode == 0:
-                devices_data = json.loads(stdout.decode())
-                simulators = []
+        # Attempt to build with recovery
+        attempt = 0
+        last_build_errors = []
 
-                for runtime, devices in devices_data.get('devices', {}).items():
-                    if 'iOS' in runtime:
-                        for device in devices:
-                            if device.get('isAvailable', False):
-                                simulators.append(device['name'])
+        while attempt < self.max_attempts:
+            attempt += 1
+            print(f"[BUILD] Starting build attempt {attempt}/{self.max_attempts}")
 
-                return simulators
-        except:
-            pass
+            # Clean build folder for fresh start or after recovery
+            if attempt == 1 or (attempt > 1 and 'recovery_applied' in locals() and recovery_applied):
+                await self._update_status("🧹 Cleaning build folder...")
+                build_dir = os.path.join(project_path, "build")
+                if os.path.exists(build_dir):
+                    shutil.rmtree(build_dir)
+                if 'recovery_applied' in locals():
+                    del recovery_applied
 
-        return []
+            await self._update_status(f"🏗️ Building app (attempt {attempt}/{self.max_attempts})...")
 
-    async def _run_xcodebuild(self, project_path: str) -> Tuple[bool, str, List[str]]:
-        """Execute xcodebuild command with VERBOSE output to diagnose issues"""
+            # Run xcodebuild
+            build_result = await self._run_xcodebuild(project_path, bundle_id, log_path)
 
+            if build_result["success"]:
+                # Build succeeded!
+                await self._update_status("✅ Build completed successfully!")
+
+                # Try to launch in simulator if available
+                if self.simulator_service:
+                    try:
+                        app_path = build_result.get("app_path")
+                        if app_path:
+                            await self._update_status("📱 Preparing to launch in iOS Simulator...")
+                            await self._update_status(f"Build completed successfully for {os.path.basename(app_path)}")
+                            
+                            # Use the combined install_and_launch_app method like in the GitHub version
+                            launch_success, launch_message = await self.simulator_service.install_and_launch_app(
+                                app_path,
+                                bundle_id,
+                                self._update_status
+                            )
+                            
+                            if launch_success:
+                                await self._update_status("🎉 App launched successfully!")
+                                build_result["simulator_launched"] = True
+                            else:
+                                warnings.append(f"Simulator: {launch_message}")
+                                await self._update_status(f"Simulator launch issue: {launch_message}")
+                    except Exception as e:
+                        await self._update_status(f"Simulator error: {str(e)}")
+                        warnings.append(f"Simulator error: {str(e)}")
+
+                return BuildResult(
+                    success=True,
+                    errors=[],
+                    warnings=warnings,
+                    build_time=(datetime.now() - start_time).total_seconds(),
+                    app_path=build_result.get("app_path"),  # Fixed: was output_path
+                    simulator_launched=build_result.get("simulator_launched", False),
+                    log_path=log_path
+                )
+
+            # Build failed - try to recover
+            current_errors = build_result.get("errors", [])
+            last_build_errors = current_errors
+            
+            print(f"[BUILD] Build attempt {attempt} failed with {len(current_errors)} errors")
+
+            if attempt < self.max_attempts:
+                await self._update_status("❌ Build failed. Analyzing errors and applying fixes...")
+
+                # Try error recovery if available
+                if self.error_recovery_system and current_errors:
+                    try:
+                        # Parse unique errors
+                        unique_errors = self._extract_unique_errors(current_errors)
+                        print(f"[BUILD] Found {len(unique_errors)} unique errors for recovery")
+                        await self._update_status(f"🔧 Found {len(unique_errors)} errors. Attempting automatic recovery...")
+
+                        # FIXED: Use correct parameter name 'swift_files'
+                        success, fixed_files, fixes = await self.error_recovery_system.recover_from_errors(
+                            errors=unique_errors,
+                            swift_files=swift_files,  # CORRECT PARAMETER NAME
+                            bundle_id=bundle_id
+                        )
+
+                        if success and fixed_files:
+                            print(f"[BUILD] Recovery succeeded with {len(fixed_files)} fixed files")
+                            await self._update_status(f"📝 Writing {len(fixed_files)} fixed files...")
+                            # Write fixed files back preserving directory structure
+                            for file in fixed_files:
+                                if not isinstance(file, dict) or "path" not in file or "content" not in file:
+                                    print(f"[BUILD] Skipping invalid file: {type(file)}")
+                                    continue  # Skip invalid files silently
+                                
+                                # Use the full relative path to preserve directory structure
+                                file_path = os.path.join(project_path, file["path"])
+                                
+                                # Create directory if it doesn't exist
+                                file_dir = os.path.dirname(file_path)
+                                os.makedirs(file_dir, exist_ok=True)
+                                
+                                print(f"[BUILD] Writing fixed file: {file_path}")
+                                with open(file_path, 'w') as f:
+                                    f.write(file["content"])
+                                    
+                            await self._update_status(f"✅ Fixed files written successfully")
+
+                            # Update swift_files for next iteration
+                            swift_files = fixed_files
+
+                            await self._update_status(f"✅ Applied {len(fixes)} fixes. Rebuilding...")
+                            await self._update_status(f"Applied {len(fixes)} automated fixes: {', '.join(fixes[:3])}")
+                            # Mark that recovery was applied
+                            recovery_applied = True
+                            print(f"[BUILD] Recovery applied, continuing to next build attempt")
+                            # Don't reset attempt to 0, just continue to next build
+                            continue
+                        else:
+                            print(f"[BUILD] Recovery failed or no files returned")
+
+                    except Exception as e:
+                        # Log error recovery failure silently
+                        warnings.append(f"Recovery system error: {str(e)}")
+
+                # If no fixes were applied, try clean rebuild
+                await self._update_status("No automatic fixes available. Trying clean rebuild...")
+                build_dir = os.path.join(project_path, "build")
+                if os.path.exists(build_dir):
+                    shutil.rmtree(build_dir)
+
+        # All attempts failed
+        print(f"[BUILD] All {attempt} attempts exhausted. Build failed.")
+        print(f"[BUILD] Last errors: {last_build_errors[:3]}")
+        await self._update_status("❌ Build failed after all attempts")
+        
+        final_result = BuildResult(
+            success=False,
+            errors=last_build_errors,
+            warnings=warnings,
+            build_time=(datetime.now() - start_time).total_seconds(),
+            app_path=None,
+            log_path=log_path
+        )
+        print(f"[BUILD] Returning failed result to main.py")
+        return final_result
+
+    def _validate_swift_syntax(self, swift_files: List[Dict]) -> List[str]:
+        """Basic Swift syntax validation"""
+        errors = []
+
+        for file in swift_files:
+            content = file["content"]
+            path = file["path"]
+
+            # Check for common syntax errors
+            if content.count('"') % 2 != 0:
+                errors.append(f"{path}: Unmatched quotes detected")
+
+            if content.count('{') != content.count('}'):
+                errors.append(f"{path}: Mismatched braces")
+
+            if content.count('(') != content.count(')'):
+                errors.append(f"{path}: Mismatched parentheses")
+
+            if content.count('[') != content.count(']'):
+                errors.append(f"{path}: Mismatched square brackets")
+
+        return errors
+
+    async def _run_xcodebuild(self, project_path: str, bundle_id: str, log_path: str = None) -> Dict:
+        """Run xcodebuild command"""
+
+        # Look for .xcodeproj file
         xcodeproj = None
-        print(f"Looking for .xcodeproj in: {project_path}")
-
         for item in os.listdir(project_path):
             if item.endswith('.xcodeproj'):
                 xcodeproj = item
-                print(f"Found xcodeproj: {xcodeproj}")
                 break
 
         if not xcodeproj:
-            return False, "", ["No .xcodeproj file found. xcodegen may have failed."]
+            return {
+                "success": False,
+                "errors": ["No .xcodeproj file found"]
+            }
 
-        scheme_name = xcodeproj.replace('.xcodeproj', '')
-        xcodeproj_path = os.path.join(project_path, xcodeproj)
-        derived_data_path = os.path.join(project_path, 'DerivedData')
-
-        # Get available simulators
-        available_simulators = await self._get_available_simulators()
-        print(f"Available simulators: {available_simulators}")
-
-        # Build command with VERBOSE output
-        destinations_to_try = []
-
-        for sim_name in ["iPhone 16 Pro", "iPhone 16", "iPhone 15", "iPhone 14"]:
-            if sim_name in available_simulators:
-                destinations_to_try.append(f"platform=iOS Simulator,name={sim_name}")
-                break
-
-        destinations_to_try.append("generic/platform=iOS Simulator")
-
-        for destination in destinations_to_try:
-            # CRITICAL: Add -verbose flag and ensure we're building the right target
-            cmd = [
-                'xcodebuild',
-                '-project', xcodeproj_path,
-                '-scheme', scheme_name,
-                '-configuration', 'Debug',
-                '-derivedDataPath', derived_data_path,
-                '-destination', destination,
-                '-sdk', 'iphonesimulator',
-                'CODE_SIGN_IDENTITY=',
-                'CODE_SIGNING_REQUIRED=NO',
-                'CODE_SIGNING_ALLOWED=NO',
-                'ONLY_ACTIVE_ARCH=NO',  # Build for all architectures
-                'VALID_ARCHS=x86_64 arm64',  # Ensure we build for simulator architectures
-                '-verbose',  # Add verbose output
-                'build'
-            ]
-
-            print(f"Trying build with destination: {destination}")
-            print(f"Build command: {' '.join(cmd)}")
-
-            try:
-                env = os.environ.copy()
-                env['PLATFORM_NAME'] = 'iphonesimulator'
-
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env
-                )
-
-                stdout, stderr = await process.communicate()
-
-                output = stdout.decode()
-                stderr_output = stderr.decode()
-
-                # Check if any Swift files were compiled
-                if "CompileSwift" in output:
-                    print("✓ Swift files were compiled")
-                else:
-                    print("⚠️ WARNING: No Swift compilation detected in build output")
-
-                # Check for linker output
-                if "Ld " in output or "Link " in output:
-                    print("✓ Linker was invoked")
-                else:
-                    print("⚠️ WARNING: No linking detected in build output")
-
-                if process.returncode == 0:
-                    print(f"Build succeeded with destination: {destination}")
-
-                    # Verify the app bundle was created correctly
-                    app_path = self._get_app_path(project_path)
-                    if app_path:
-                        print(f"App bundle found at: {app_path}")
-
-                        # Check contents
-                        app_contents = os.listdir(app_path)
-                        print(f"App bundle contents: {app_contents}")
-
-                        # Look for executable
-                        app_name = os.path.basename(app_path).replace('.app', '')
-                        exec_path = os.path.join(app_path, app_name)
-                        if os.path.exists(exec_path):
-                            print(f"✓ Executable found: {exec_path}")
-                        else:
-                            print(f"✗ CRITICAL: Executable NOT found at expected path: {exec_path}")
-
-                            # Try to find any executable
-                            for item in app_contents:
-                                item_path = os.path.join(app_path, item)
-                                if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
-                                    print(f"  Found executable: {item}")
-
-                    return True, output, []
-
-                # Parse errors
-                errors = self._parse_errors(stderr_output + output)
-
-                # If it's actual compilation errors (not destination issues), return them
-                if errors and not any("destination" in e.lower() for e in errors):
-                    return False, output, errors
-
-                print(f"Destination {destination} failed, trying next...")
-
-            except Exception as e:
-                print(f"Error with destination {destination}: {str(e)}")
-                continue
-
-        # Try minimal build as last resort with more specific settings
-        print("Trying minimal build with explicit settings...")
-
-        cmd = [
-            'xcodebuild',
-            '-project', xcodeproj_path,
-            '-scheme', scheme_name,
-            '-sdk', 'iphonesimulator',
-            '-configuration', 'Debug',
-            '-derivedDataPath', derived_data_path,
-            'ONLY_ACTIVE_ARCH=NO',
-            'VALID_ARCHS=x86_64 arm64',
-            'CODE_SIGN_IDENTITY=',
-            'CODE_SIGNING_REQUIRED=NO',
-            'EXCLUDED_ARCHS=',  # Don't exclude any architectures
-            '-verbose',
-            'clean',  # Clean first
-            'build'   # Then build
+        # Build command
+        build_command = [
+            "xcodebuild",
+            "-project", xcodeproj,
+            "-scheme", xcodeproj.replace('.xcodeproj', ''),
+            "-destination", "platform=iOS Simulator,name=iPhone 16",
+            "-configuration", "Debug",
+            "-derivedDataPath", "build",
+            "CODE_SIGN_IDENTITY=",
+            "CODE_SIGNING_REQUIRED=NO",
+            "CODE_SIGNING_ALLOWED=NO",
+            "build"
         ]
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            # Clean any macOS metadata before building
+            subprocess.run(
+                ["xattr", "-cr", project_path],
+                capture_output=True
             )
+            
+            # Run build
+            result = subprocess.run(
+                build_command,
+                cwd=project_path,
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            # Write build output to log file if provided
+            if log_path:
+                with open(log_path, 'a') as f:
+                    f.write("\n--- xcodebuild output ---\n")
+                    f.write(result.stdout)
+                    if result.stderr:
+                        f.write("\n--- xcodebuild errors ---\n")
+                        f.write(result.stderr)
+                    f.write("\n--- end xcodebuild output ---\n")
 
-            stdout, stderr = await process.communicate()
-
-            if process.returncode == 0:
-                print("Minimal build succeeded!")
-                return True, stdout.decode(), []
+            if result.returncode == 0:
+                # Find the .app bundle
+                app_path = self._find_app_bundle(project_path)
+                return {
+                    "success": True,
+                    "app_path": app_path,
+                    "output": result.stdout
+                }
             else:
-                errors = self._parse_errors(stderr.decode() + stdout.decode())
+                # Parse errors from output
+                errors = self._parse_xcodebuild_errors(result.stdout + result.stderr)
+                return {
+                    "success": False,
+                    "errors": errors,
+                    "output": result.stdout + result.stderr
+                }
 
-                # If no specific errors found, add a generic one
-                if not errors:
-                    errors = ["Build failed but no specific errors were captured. Check build output."]
-
-                return False, stdout.decode(), errors
-
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "errors": ["Build timed out after 120 seconds"]
+            }
         except Exception as e:
-            return False, "", [f"Build failed: {str(e)}"]
+            return {
+                "success": False,
+                "errors": [f"Build error: {str(e)}"]
+            }
 
-    def _parse_errors(self, text: str) -> List[str]:
-        """Parse error messages from build output"""
-        errors = []
-        lines = text.split('\n')
+    def _find_app_bundle(self, project_path: str) -> Optional[str]:
+        """Find the built .app bundle"""
+        build_dir = os.path.join(project_path, "build", "Build", "Products")
+        # Looking for app bundle
 
-        for i, line in enumerate(lines):
-            line = line.strip()
-
-            # Look for Swift compilation errors specifically
-            if ('error:' in line and '.swift' in line) or \
-                    ('** BUILD FAILED **' in line) or \
-                    ('fatal error:' in line):
-
-                # Don't duplicate BUILD FAILED
-                if '** BUILD FAILED **' in line and errors:
-                    continue
-
-                # For Swift errors, try to get the full error message
-                if '.swift:' in line and 'error:' in line:
-                    # This is a Swift compilation error
-                    error_msg = line
-
-                    # Sometimes error details are on next lines
-                    if i + 1 < len(lines) and lines[i + 1].strip():
-                        next_line = lines[i + 1].strip()
-                        if not any(keyword in next_line for keyword in ['error:', 'warning:', '.swift:']):
-                            error_msg += f" {next_line}"
-
-                    errors.append(error_msg)
-                else:
-                    errors.append(line)
-
-        return errors[:10]
-
-    def _parse_warnings(self, output: str) -> List[str]:
-        """Parse warning messages from build output"""
-        warnings = []
-        for line in output.split('\n'):
-            if 'warning:' in line.lower() and '.swift' in line:
-                warnings.append(line.strip())
-        return warnings[:10]
-
-    def _get_app_path(self, project_path: str) -> Optional[str]:
-        """Get path to built .app bundle"""
-        derived_data = os.path.join(project_path, "DerivedData")
-        build_products = os.path.join(derived_data, "Build", "Products", "Debug-iphonesimulator")
-
-        if os.path.exists(build_products):
-            for item in os.listdir(build_products):
-                if item.endswith('.app'):
-                    return os.path.join(build_products, item)
+        if os.path.exists(build_dir):
+            for root, dirs, files in os.walk(build_dir):
+                for dir_name in dirs:
+                    if dir_name.endswith('.app'):
+                        app_path = os.path.join(root, dir_name)
+                        # Found app bundle
+                        return app_path
+        else:
+            print(f"[BUILD] Build directory does not exist: {build_dir}")
 
         return None
+
+    def _parse_xcodebuild_errors(self, output: str) -> List[str]:
+        """Parse errors from xcodebuild output"""
+        errors = []
+
+        # Common error patterns
+        error_patterns = [
+            r"error: (.+)",
+            r"fatal error: (.+)",
+            r"\*\* BUILD FAILED \*\*",
+            r"The following build commands failed:",
+            r"CompileSwift normal .+ (.+\.swift)",
+            r"(.+\.swift):(\d+):(\d+): error: (.+)"
+        ]
+
+        lines = output.split('\n')
+        for i, line in enumerate(lines):
+            for pattern in error_patterns:
+                match = re.search(pattern, line)
+                if match:
+                    if "BUILD FAILED" in line:
+                        # Look for the actual error in nearby lines
+                        for j in range(max(0, i-10), min(len(lines), i+10)):
+                            if "error:" in lines[j]:
+                                errors.append(lines[j].strip())
+                    else:
+                        errors.append(line.strip())
+                    break
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_errors = []
+        for error in errors:
+            if error not in seen:
+                seen.add(error)
+                unique_errors.append(error)
+
+        return unique_errors[:10]  # Limit to first 10 errors
+
+    def _extract_unique_errors(self, errors: List[str]) -> List[str]:
+        """Extract unique, meaningful errors"""
+        unique = []
+        seen = set()
+
+        for error in errors:
+            # Clean up the error
+            cleaned = re.sub(r'/.+/Sources/', 'Sources/', error)
+            cleaned = re.sub(r'^\s*\d+\s+', '', cleaned)
+
+            if cleaned not in seen and len(cleaned) > 10:
+                seen.add(cleaned)
+                unique.append(cleaned)
+
+        return unique

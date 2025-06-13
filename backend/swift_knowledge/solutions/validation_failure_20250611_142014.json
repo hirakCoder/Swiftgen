@@ -1,0 +1,14 @@
+{
+  "title": "Validation Failure: 2025-06-11 14:20",
+  "content": "Validation failed with 2 errors:\n[DependencyValidator] Sources/ContentView.swift: Found phantom dependency: import AudioToolbox\n[BuildabilityValidator] Sources/App.swift: Missing Combine import",
+  "tags": [
+    "validation",
+    "failure",
+    "DependencyValidator",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

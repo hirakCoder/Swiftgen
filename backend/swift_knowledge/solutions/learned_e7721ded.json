@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: error: filename \"CalculatorButton.swift\" used twic...",
+  "content": "Error: error: filename \"CalculatorButton.swift\" used twice: '/Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/workspaces/proj_19a400e6/Sources/CalculatorButton.swift' and '/Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/workspaces/proj_19a400e6/Sources/Models/CalculatorButton.swift'\n\nSolution: Fixed using _claude_recovery strategy",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed using _claude_recovery strategy"
+  ]
+}

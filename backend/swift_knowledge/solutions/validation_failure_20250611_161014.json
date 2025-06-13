@@ -1,0 +1,13 @@
+{
+  "title": "Validation Failure: 2025-06-11 16:10",
+  "content": "Validation failed with 1 errors:\n[BuildabilityValidator] Sources/App.swift: Missing Combine import",
+  "tags": [
+    "validation",
+    "failure",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

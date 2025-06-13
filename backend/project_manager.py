@@ -3,37 +3,52 @@ import shutil
 import json
 import yaml
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+import hashlib
 
 class ProjectManager:
+    """Project Manager with permanent fixes for app naming issues"""
+
     def __init__(self):
         self.workspaces_dir = "../workspaces"
         self.templates_dir = "../templates/ios_app_template"
         os.makedirs(self.workspaces_dir, exist_ok=True)
 
-    def _create_safe_bundle_id(self, app_name: str) -> str:
-        """Create a safe bundle ID from app name - NO SPACES ALLOWED"""
-        # Remove all non-alphanumeric characters and convert to lowercase
-        safe_name = re.sub(r'[^a-zA-Z0-9]', '', app_name).lower()
+        # Reserved Swift keywords and types to avoid
+        self.reserved_types = {
+            'Task', 'State', 'Action', 'Result', 'Error', 'Never', 'Any',
+            'AnyObject', 'Void', 'Bool', 'Int', 'Double', 'Float', 'String',
+            'Array', 'Dictionary', 'Set', 'Optional', 'Collection'
+        }
 
-        # Ensure it starts with a letter
+        # Simplified validation rules
+        self.max_files = 10  # Prevent overly complex apps
+        self.min_content_size = 100  # Ensure files have real content
+
+    def _create_safe_bundle_id(self, app_name: str) -> str:
+        """Create a safe bundle ID from app name"""
+        # CRITICAL: Remove spaces first
+        safe_name = app_name.replace(" ", "").lower()
+        safe_name = re.sub(r'[^a-z0-9]', '', safe_name)
+
         if safe_name and not safe_name[0].isalpha():
             safe_name = 'app' + safe_name
 
-        # Fallback if empty
         if not safe_name:
             safe_name = 'myapp'
 
-        # Ensure reasonable length
         safe_name = safe_name[:20]
 
         return f"com.swiftgen.{safe_name}"
 
     def _create_safe_target_name(self, app_name: str) -> str:
         """Create a safe target name for Xcode - no spaces or special characters"""
+        # CRITICAL FIX: Remove spaces FIRST to prevent casing issues
+        safe_name = app_name.replace(" ", "")
+
         # Remove all non-alphanumeric characters
-        safe_name = re.sub(r'[^a-zA-Z0-9]', '', app_name)
+        safe_name = re.sub(r'[^a-zA-Z0-9]', '', safe_name)
 
         # Ensure it starts with a letter
         if safe_name and not safe_name[0].isalpha():
@@ -50,8 +65,12 @@ class ProjectManager:
 
     def _create_safe_product_name(self, app_name: str) -> str:
         """Create a safe product name (executable name) - MUST MATCH EVERYWHERE"""
-        # This MUST match what's used in project.yml PRODUCT_NAME
-        safe_name = re.sub(r'[^a-zA-Z0-9]', '', app_name)
+        # CRITICAL FIX: This MUST match exactly what's used in project.yml
+        # Remove ALL spaces first to prevent "Cool Timer" vs "Cool TImer" issues
+        safe_name = app_name.replace(" ", "")
+
+        # Then remove any other non-alphanumeric characters
+        safe_name = re.sub(r'[^a-zA-Z0-9]', '', safe_name)
 
         if not safe_name:
             safe_name = "MyApp"
@@ -67,274 +86,235 @@ class ProjectManager:
         # Remove any non-Swift files from Sources
         if path.startswith("Sources/") and not path.endswith(".swift"):
             # If it's an asset or config file, skip it
-            if "Assets.xcassets" in path or ".json" in path or ".pdf" in path:
-                return None
+            return None
 
-        # Ensure Swift files are in Sources directory
+        # Ensure proper Swift file paths
         if path.endswith(".swift") and not path.startswith("Sources/"):
-            return f"Sources/{os.path.basename(path)}"
+            return f"Sources/{path}"
 
         return path
 
-    async def create_project(self, project_id: str, generated_code: Dict, app_name: str) -> str:
-        """Create a new iOS project from generated code"""
+    def _validate_swift_content(self, content: str, filename: str) -> Tuple[bool, List[str]]:
+        """Validate Swift content for common issues"""
+        issues = []
 
-        # CRITICAL: Create all names ONCE and use consistently
-        safe_target_name = self._create_safe_target_name(app_name)
-        safe_product_name = self._create_safe_product_name(app_name)
-        safe_bundle_id = self._create_safe_bundle_id(app_name)
+        # Check for empty content
+        if not content or len(content.strip()) < 10:
+            issues.append(f"{filename}: File content is too short or empty")
+            return False, issues
 
-        print(f"\n[PROJECT MANAGER] Creating project with CONSISTENT naming:")
-        print(f"  Original App Name: {app_name}")
+        # Check for reserved type usage
+        for reserved in self.reserved_types:
+            pattern = rf'\b(struct|class|enum)\s+{reserved}\b'
+            if re.search(pattern, content):
+                issues.append(f"{filename}: Uses reserved type name '{reserved}'")
+
+        # Check for basic Swift structure
+        if not any(keyword in content for keyword in ['import', 'struct', 'class', 'func', '@main']):
+            issues.append(f"{filename}: Doesn't appear to be valid Swift code")
+
+        return len(issues) == 0, issues
+
+    def _validate_project_consistency(self, project_path: str, app_name: str,
+                                      safe_target_name: str, safe_product_name: str) -> bool:
+        """Validate and fix project consistency issues"""
+
+        # Check project.yml
+        project_yml_path = os.path.join(project_path, "project.yml")
+        if os.path.exists(project_yml_path):
+            with open(project_yml_path, 'r') as f:
+                content = f.read()
+
+            # Fix any inconsistencies
+            original_content = content
+
+            # Ensure PRODUCT_NAME has no spaces
+            content = re.sub(
+                r'(PRODUCT_NAME:\s*")([^"]+)(")',
+                f'\\1{safe_product_name}\\3',
+                content
+            )
+
+            # Ensure target name is consistent
+            content = re.sub(
+                r'^name:\s*.+$',
+                f'name: {safe_target_name}',
+                content,
+                flags=re.MULTILINE
+            )
+
+            if content != original_content:
+                print(f"[PROJECT MANAGER] Fixed naming inconsistencies in project.yml")
+                with open(project_yml_path, 'w') as f:
+                    f.write(content)
+
+        return True
+
+    async def create_project(self, project_id: str, generated_code: Dict,
+                             app_name: str = None) -> str:
+        """Create a new iOS project with CONSISTENT naming"""
+
+        # CRITICAL: Sanitize app name immediately
+        if app_name:
+            display_name = app_name  # Keep original for display/UI
+            safe_app_name = re.sub(r'[^a-zA-Z0-9]', '', app_name)
+        else:
+            display_name = generated_code.get("app_name", "MyApp")
+            safe_app_name = re.sub(r'[^a-zA-Z0-9]', '', display_name)
+
+        # Create all safe names upfront
+        safe_target_name = self._create_safe_target_name(safe_app_name)
+        safe_product_name = self._create_safe_product_name(safe_app_name)
+        bundle_id = generated_code.get("bundle_id") or self._create_safe_bundle_id(safe_app_name)
+
+        print(f"\n[PROJECT MANAGER] Creating project:")
+        print(f"  Display Name: {display_name}")
         print(f"  Safe Target Name: {safe_target_name}")
         print(f"  Safe Product Name: {safe_product_name}")
-        print(f"  Safe Bundle ID: {safe_bundle_id}")
+        print(f"  Bundle ID: {bundle_id}")
 
+        # Create project directory
         project_path = os.path.join(self.workspaces_dir, project_id)
         os.makedirs(project_path, exist_ok=True)
-
-        # Create Info.plist with correct executable name
-        self._create_info_plist(project_path, app_name, safe_product_name)
 
         # Create Sources directory
         sources_dir = os.path.join(project_path, "Sources")
         os.makedirs(sources_dir, exist_ok=True)
 
-        # CRITICAL FIX: Debug what we're receiving
-        print(f"\n[PROJECT MANAGER] Received generated_code keys: {generated_code.keys()}")
-        print(f"[PROJECT MANAGER] Type of generated_code: {type(generated_code)}")
+        # Process and write files
+        files = generated_code.get("files", [])
+        valid_files = []
+        validation_issues = []
+        filename_to_paths = {}  # Track filenames for duplicate detection
 
-        # Get files from generated_code
-        files_to_write = generated_code.get("files", [])
-        print(f"[PROJECT MANAGER] Number of files to write: {len(files_to_write)}")
-
-        # Write generated files - CRITICAL: Fix paths and filter non-Swift files
-        has_main_file = False
-        files_written = 0
-        valid_swift_files = []
-
-        for i, file_info in enumerate(files_to_write):
-            print(f"\n[PROJECT MANAGER] Processing file {i+1}:")
-            print(f"  Type: {type(file_info)}")
-            print(f"  Keys: {file_info.keys() if isinstance(file_info, dict) else 'Not a dict'}")
-
-            if not isinstance(file_info, dict):
-                print(f"[WARNING] File info is not a dict: {file_info}")
-                continue
-
+        # First pass: collect all paths and check for duplicates
+        for file_info in files:
             original_path = file_info.get("path", "")
             content = file_info.get("content", "")
 
-            print(f"  Original path: {original_path}")
-            print(f"  Content length: {len(content)} chars")
-            print(f"  Content preview: {content[:100]}..." if content else "  No content!")
-
-            # CRITICAL: Ensure we have both path and content
-            if not original_path or not content:
-                print(f"[WARNING] Missing path or content for file {i+1}")
-                print(f"  Path: '{original_path}'")
-                print(f"  Has content: {bool(content)}")
-                continue
-
+            # Fix file path
             fixed_path = self._fix_file_path(original_path)
-
-            # Skip non-Swift files in Sources
-            if fixed_path is None:
+            if not fixed_path:
                 print(f"[PROJECT MANAGER] Skipping non-Swift file: {original_path}")
                 continue
 
-            # Only process actual Swift files
-            if not fixed_path.endswith(".swift"):
-                print(f"[PROJECT MANAGER] Skipping non-Swift file: {fixed_path}")
+            # Ensure the file is in Sources directory
+            if not fixed_path.startswith("Sources/"):
+                fixed_path = f"Sources/{os.path.basename(fixed_path)}"
+
+            # Check for duplicate filenames
+            filename = os.path.basename(fixed_path)
+            if filename in filename_to_paths:
+                print(f"[PROJECT MANAGER] WARNING: Duplicate filename '{filename}' detected during creation!")
+                print(f"  Existing: {filename_to_paths[filename]}")
+                print(f"  Skipping: {fixed_path}")
+                validation_issues.append(f"Duplicate filename '{filename}': {fixed_path} (kept {filename_to_paths[filename]})")
+                continue
+            
+            filename_to_paths[filename] = fixed_path
+
+        # Second pass: validate and write files
+        for file_info in files:
+            original_path = file_info.get("path", "")
+            content = file_info.get("content", "")
+
+            # Fix file path
+            fixed_path = self._fix_file_path(original_path)
+            if not fixed_path:
                 continue
 
-            file_path = os.path.join(project_path, fixed_path)
+            # Ensure the file is in Sources directory
+            if not fixed_path.startswith("Sources/"):
+                fixed_path = f"Sources/{os.path.basename(fixed_path)}"
 
-            # CRITICAL: Ensure content exists and is not empty
-            if not content.strip():
-                print(f"[WARNING] Empty file content for {fixed_path}")
+            # Only process if this is the chosen path for this filename
+            filename = os.path.basename(fixed_path)
+            if filename_to_paths.get(filename) != fixed_path:
                 continue
 
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            # Validate content
+            is_valid, issues = self._validate_swift_content(content, fixed_path)
+            if issues:
+                validation_issues.extend(issues)
 
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
+            if is_valid or len(issues) == 0:  # Allow files with warnings
+                file_path = os.path.join(project_path, fixed_path)
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                with open(file_path, 'w') as f:
                     f.write(content)
-                    files_written += 1
-                    print(f"[PROJECT MANAGER] Successfully wrote file: {file_path}")
-                    print(f"  File size: {len(content)} bytes")
-            except Exception as e:
-                print(f"[ERROR] Failed to write file {file_path}: {str(e)}")
-                continue
 
-            valid_swift_files.append({
-                "path": fixed_path,
-                "content": content
-            })
+                valid_files.append(fixed_path)
 
-            # Check if we have a main app file
-            if "@main" in content:
-                has_main_file = True
-                print(f"[PROJECT MANAGER] Found @main in {fixed_path}")
+        print(f"[PROJECT MANAGER] Wrote {len(valid_files)} files")
 
-        print(f"\n[PROJECT MANAGER] Wrote {files_written} Swift files to disk")
+        if validation_issues:
+            print(f"[PROJECT MANAGER] Validation warnings: {len(validation_issues)}")
+            for issue in validation_issues[:5]:  # Show first 5 issues
+                print(f"  - {issue}")
 
-        # CRITICAL: If no @main file exists, create one with consistent naming
-        if not has_main_file:
-            print(f"[PROJECT MANAGER] No @main app file found, creating default with name: {safe_target_name}App")
-            app_content = f"""import SwiftUI
-
-@main
-struct {safe_target_name}App: App {{
-    var body: some Scene {{
-        WindowGroup {{
-            ContentView()
-        }}
-    }}
-}}
-"""
-            app_path = os.path.join(sources_dir, "App.swift")
-            try:
-                with open(app_path, 'w', encoding='utf-8') as f:
-                    f.write(app_content)
-                files_written += 1
-                print(f"[PROJECT MANAGER] Created default App.swift at {app_path}")
-            except Exception as e:
-                print(f"[ERROR] Failed to create App.swift: {str(e)}")
-
-            # Also create a ContentView if we don't have one
-            has_content_view = any("ContentView" in f.get("content", "") for f in valid_swift_files)
-            if not has_content_view:
-                content_view_content = """import SwiftUI
-
-struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}
-"""
-                content_view_path = os.path.join(sources_dir, "ContentView.swift")
-                try:
-                    with open(content_view_path, 'w', encoding='utf-8') as f:
-                        f.write(content_view_content)
-                    files_written += 1
-                    print(f"[PROJECT MANAGER] Created default ContentView.swift at {content_view_path}")
-                except Exception as e:
-                    print(f"[ERROR] Failed to create ContentView.swift: {str(e)}")
-
-        # CRITICAL: Verify we have actual Swift files
-        print(f"\n[PROJECT MANAGER] Verifying Swift files in {sources_dir}...")
-        try:
-            actual_files = os.listdir(sources_dir)
-            print(f"[PROJECT MANAGER] Files in Sources directory: {actual_files}")
-
-            # Read and verify each file
-            for filename in actual_files:
-                if filename.endswith('.swift'):
-                    file_path = os.path.join(sources_dir, filename)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            print(f"[PROJECT MANAGER] Verified {filename}: {len(content)} bytes")
-                            if "@main" in content:
-                                print(f"  - Contains @main entry point")
-                    except Exception as e:
-                        print(f"[ERROR] Could not read {filename}: {str(e)}")
-        except Exception as e:
-            print(f"[ERROR] Could not list Sources directory: {str(e)}")
-
-        # Generate project.yml for xcodegen with CONSISTENT NAMING
-        project_yml = self._generate_project_yml(
-            app_name,
-            safe_bundle_id,
-            safe_target_name,
-            safe_product_name,
-            generated_code.get("dependencies", [])
-        )
-
-        with open(os.path.join(project_path, "project.yml"), 'w') as f:
-            yaml.dump(project_yml, f, default_flow_style=False)
-
-        # Save project metadata with all naming info
-        metadata = {
-            "project_id": project_id,
-            "app_name": app_name,
-            "created_at": datetime.now().isoformat(),
-            "bundle_id": safe_bundle_id,
-            "product_name": safe_product_name,
-            "target_name": safe_target_name,
-            "files": [f["path"] for f in valid_swift_files],
-            "modifications": []
+        # Create project.yml with CONSISTENT naming
+        project_yml = {
+            'name': safe_target_name,  # NO SPACES
+            'options': {
+                'bundleIdPrefix': 'com.swiftgen',
+                'deploymentTarget': '16.0'
+            },
+            'settings': {
+                'PRODUCT_NAME': safe_product_name,  # CONSISTENT, NO SPACES
+                'PRODUCT_BUNDLE_IDENTIFIER': bundle_id,
+                'MARKETING_VERSION': '1.0',
+                'CURRENT_PROJECT_VERSION': '1',
+                'DISPLAY_NAME': display_name  # Original name for UI display
+            },
+            'targets': {
+                safe_target_name: {  # Target name matches project name
+                    'type': 'application',
+                    'platform': 'iOS',
+                    'sources': ['Sources'],
+                    'settings': {
+                        'INFOPLIST_FILE': 'Info.plist',
+                        'PRODUCT_NAME': safe_product_name,  # MUST BE CONSISTENT
+                        'PRODUCT_BUNDLE_IDENTIFIER': bundle_id,
+                        'SWIFT_VERSION': '5.9',
+                        'TARGETED_DEVICE_FAMILY': '1,2',
+                        'IPHONEOS_DEPLOYMENT_TARGET': '16.0'
+                    }
+                }
+            }
         }
 
-        with open(os.path.join(project_path, "project.json"), 'w') as f:
-            json.dump(metadata, f, indent=2)
+        # Write project.yml
+        project_yml_path = os.path.join(project_path, 'project.yml')
+        with open(project_yml_path, 'w') as f:
+            yaml.dump(project_yml, f, default_flow_style=False, sort_keys=False)
 
-        print(f"\n[PROJECT MANAGER] Project creation complete:")
-        print(f"  - Project path: {project_path}")
-        print(f"  - Files written: {files_written}")
-        print(f"  - Bundle ID: {safe_bundle_id}")
-
-        return project_path
-
-    def _verify_swift_files(self, sources_dir: str) -> bool:
-        """Verify Swift files exist and are valid"""
-        swift_files = []
-        for root, _, files in os.walk(sources_dir):
-            for file in files:
-                if file.endswith('.swift'):
-                    swift_files.append(os.path.join(root, file))
-
-        print(f"[PROJECT MANAGER] Verification: Found {len(swift_files)} Swift files")
-
-        if not swift_files:
-            raise Exception("CRITICAL: No Swift files found after project creation!")
-
-        # Verify at least one has @main
-        has_main = False
-        for file_path in swift_files:
-            with open(file_path, 'r') as f:
-                if '@main' in f.read():
-                    has_main = True
-                    print(f"[PROJECT MANAGER] Verified @main in {os.path.basename(file_path)}")
-                    break
-
-        if not has_main:
-            raise Exception("CRITICAL: No @main entry point found in any Swift file!")
-
-        return True
-
-    def _create_info_plist(self, project_path: str, app_name: str, executable_name: str):
-        """Create Info.plist with EXPLICIT executable name"""
-        info_plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+        # Create Info.plist with display name
+        info_plist = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>{display_name}</string>
     <key>CFBundleExecutable</key>
-    <string>{executable_name}</string>
+    <string>{safe_product_name}</string>
     <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <string>{bundle_id}</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>{app_name}</string>
-    <key>CFBundleDisplayName</key>
-    <string>{app_name}</string>
+    <string>{safe_product_name}</string>
     <key>CFBundlePackageType</key>
-    <string>APPL</string>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
@@ -356,234 +336,193 @@ struct ContentView: View {
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
 </dict>
-</plist>"""
+</plist>'''
 
-        with open(os.path.join(project_path, "Info.plist"), 'w') as f:
-            f.write(info_plist_content)
+        info_plist_path = os.path.join(project_path, 'Info.plist')
+        with open(info_plist_path, 'w') as f:
+            f.write(info_plist)
 
-    def _generate_project_yml(self, app_name: str, bundle_id: str,
-                              target_name: str, product_name: str,
-                              dependencies: List[str]) -> Dict:
-        """Generate xcodegen configuration with PROPER COMPILATION SETTINGS"""
-
-        print(f"\n[PROJECT YML] Generating with consistent names:")
-        print(f"  Project Name: {target_name}")
-        print(f"  Target Name: {target_name}")
-        print(f"  Product Name: {product_name}")
-        print(f"  Bundle ID: {bundle_id}")
-
-        config = {
-            'name': target_name,
-            'options': {
-                'bundleIdPrefix': bundle_id.rsplit('.', 1)[0],
-                'createIntermediateGroups': True,
-                'deploymentTarget': {
-                    'iOS': '16.0'
-                }
-            },
-            'targets': {
-                target_name: {
-                    'type': 'application',
-                    'platform': 'iOS',
-                    # CRITICAL FIX: Use string path instead of complex object
-                    'sources': 'Sources',
-                    'settings': {
-                        'base': {
-                            'INFOPLIST_FILE': 'Info.plist',
-                            'PRODUCT_BUNDLE_IDENTIFIER': bundle_id,
-                            'MARKETING_VERSION': '1.0',
-                            'CURRENT_PROJECT_VERSION': '1',
-                            'PRODUCT_NAME': product_name,
-                            'PRODUCT_MODULE_NAME': target_name,
-                            'EXECUTABLE_NAME': product_name,
-                            'CODE_SIGN_STYLE': 'Manual',
-                            'DEVELOPMENT_TEAM': '',
-                            'CODE_SIGN_IDENTITY': '',
-                            'CODE_SIGNING_REQUIRED': 'NO',
-                            'CODE_SIGNING_ALLOWED': 'NO',
-                            'ASSETCATALOG_COMPILER_APPICON_NAME': 'AppIcon',
-                            'ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME': 'AccentColor',
-                            'CLANG_ENABLE_MODULES': 'YES',
-                            'SWIFT_OPTIMIZATION_LEVEL': '-Onone',
-                            'ENABLE_TESTABILITY': 'YES',
-                            'GCC_DYNAMIC_NO_PIC': 'NO',
-                            'GCC_OPTIMIZATION_LEVEL': '0',
-                            'GCC_PREPROCESSOR_DEFINITIONS': 'DEBUG=1 $(inherited)',
-                            'MTL_ENABLE_DEBUG_INFO': 'INCLUDE_SOURCE',
-                            'MTL_FAST_MATH': 'YES',
-                            'OTHER_SWIFT_FLAGS': '-D DEBUG',
-                            'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'DEBUG',
-                            'ENABLE_PREVIEWS': 'YES',
-                            'DEVELOPMENT_ASSET_PATHS': '',
-                            'IPHONEOS_DEPLOYMENT_TARGET': '16.0',
-                            'SDKROOT': 'iphoneos',
-                            'SUPPORTED_PLATFORMS': 'iphonesimulator iphoneos',
-                            'TARGETED_DEVICE_FAMILY': '1,2',
-                            'SWIFT_VERSION': '5.9'
-                        }
-                    }
-                }
-            }
+        # Store project metadata
+        project_metadata = {
+            'project_id': project_id,
+            'app_name': display_name,  # Original display name
+            'safe_app_name': safe_app_name,
+            'target_name': safe_target_name,
+            'product_name': safe_product_name,
+            'bundle_id': bundle_id,
+            'created_at': datetime.now().isoformat(),
+            'files': valid_files,
+            'validation_issues': validation_issues
         }
 
-        # Add dependencies if any
-        if dependencies:
-            config['targets'][target_name]['dependencies'] = []
-            for dep in dependencies:
-                config['targets'][target_name]['dependencies'].append({
-                    'package': dep
-                })
+        metadata_path = os.path.join(project_path, 'project.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(project_metadata, f, indent=2)
 
-        return config
+        # Final validation
+        self._validate_project_consistency(project_path, display_name, safe_target_name, safe_product_name)
 
-    async def update_project_files(self, project_id: str, updated_files: List[Dict]) -> bool:
-        """Update existing project files"""
-        project_path = os.path.join(self.workspaces_dir, project_id)
-        if not os.path.exists(project_path):
-            return False
+        print(f"\n[PROJECT MANAGER] Project created successfully:")
+        print(f"  Path: {project_path}")
+        print(f"  Files: {len(valid_files)}")
+        print(f"  Bundle ID: {bundle_id}")
 
-        # Load project metadata to maintain naming consistency
-        metadata_path = os.path.join(project_path, "project.json")
-        metadata = {}
-        if os.path.exists(metadata_path):
-            with open(metadata_path, 'r') as f:
-                metadata = json.load(f)
+        return project_path
 
-        # Backup current files
-        backup_dir = os.path.join(project_path, ".backups", datetime.now().strftime("%Y%m%d_%H%M%S"))
-        os.makedirs(backup_dir, exist_ok=True)
+    async def update_project_files(self, project_id: str, modified_files: List[Dict]) -> bool:
+        """Update project files after modification with duplicate detection"""
 
-        # Update each file
-        for file_info in updated_files:
-            # Fix file paths
-            original_path = file_info["path"]
-            fixed_path = self._fix_file_path(original_path)
+        project_path = await self.get_project_path(project_id)
+        if not project_path:
+            raise ValueError(f"Project {project_id} not found")
 
-            if fixed_path is None or not fixed_path.endswith(".swift"):
-                print(f"[PROJECT MANAGER] Skipping non-Swift file update: {original_path}")
-                continue
-
-            file_path = os.path.join(project_path, fixed_path)
-
-            # Backup existing file if it exists
-            if os.path.exists(file_path):
-                backup_path = os.path.join(backup_dir, fixed_path)
-                os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-                shutil.copy2(file_path, backup_path)
-
-            # Write new content
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'w') as f:
-                f.write(file_info["content"])
-
-        # Update metadata
-        if metadata:
-            metadata["last_modified"] = datetime.now().isoformat()
-            metadata["modifications"].append({
-                "timestamp": datetime.now().isoformat(),
-                "files_updated": [f["path"] for f in updated_files if f["path"].endswith(".swift")]
-            })
-
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
-
-        return True
-
-    async def get_project_status(self, project_id: str) -> Optional[Dict]:
-        """Get project status and metadata"""
-        project_path = os.path.join(self.workspaces_dir, project_id)
-        metadata_path = os.path.join(project_path, "project.json")
-
-        if not os.path.exists(metadata_path):
-            return None
-
+        # Load project metadata
+        metadata_path = os.path.join(project_path, 'project.json')
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
 
-        # Check if app was built
-        derived_data = os.path.join(project_path, "DerivedData")
-        app_built = False
-        app_path = None
+        # Get safe names from metadata
+        safe_product_name = metadata.get('product_name')
+        safe_target_name = metadata.get('target_name')
 
-        if os.path.exists(derived_data):
-            # Look for .app bundle
-            for root, dirs, files in os.walk(derived_data):
-                for dir_name in dirs:
-                    if dir_name.endswith('.app'):
-                        app_path = os.path.join(root, dir_name)
-                        app_built = True
+        # Track filenames to detect duplicates
+        filename_to_paths = {}
+        updated_files = []
 
-                        # Verify executable exists
-                        expected_executable = metadata.get('product_name', '')
-                        if expected_executable:
-                            exec_path = os.path.join(app_path, expected_executable)
-                            if not os.path.exists(exec_path):
-                                print(f"[WARNING] Expected executable '{expected_executable}' not found in app bundle")
-                                app_built = False
-                        break
-                if app_built:
-                    break
+        # First pass: collect all file paths and check for duplicates
+        for file_info in modified_files:
+            original_path = file_info.get("path", "")
+            content = file_info.get("content", "")
 
-        metadata['app_built'] = app_built
-        metadata['project_path'] = project_path
-        metadata['app_path'] = app_path
+            # Fix file path
+            fixed_path = self._fix_file_path(original_path)
+            if not fixed_path:
+                continue
 
-        return metadata
+            # Ensure the file is in Sources directory
+            if not fixed_path.startswith("Sources/"):
+                fixed_path = f"Sources/{os.path.basename(fixed_path)}"
 
-    async def get_project_files(self, project_id: str) -> List[Dict]:
-        """Get all source files in project"""
-        project_path = os.path.join(self.workspaces_dir, project_id)
+            # Extract filename for duplicate detection
+            filename = os.path.basename(fixed_path)
+            
+            if filename in filename_to_paths:
+                print(f"[PROJECT MANAGER] WARNING: Duplicate filename '{filename}' detected!")
+                print(f"  Existing: {filename_to_paths[filename]}")
+                print(f"  New: {fixed_path}")
+                # Skip duplicate files - keep the first one
+                continue
+            
+            filename_to_paths[filename] = fixed_path
+
+        # Second pass: write files (only non-duplicates)
+        for file_info in modified_files:
+            original_path = file_info.get("path", "")
+            content = file_info.get("content", "")
+
+            # Fix file path
+            fixed_path = self._fix_file_path(original_path)
+            if not fixed_path:
+                continue
+
+            # Ensure the file is in Sources directory
+            if not fixed_path.startswith("Sources/"):
+                fixed_path = f"Sources/{os.path.basename(fixed_path)}"
+
+            # Only write if this path is the chosen one for this filename
+            filename = os.path.basename(fixed_path)
+            if filename_to_paths.get(filename) != fixed_path:
+                continue
+
+            file_path = os.path.join(project_path, fixed_path)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            with open(file_path, 'w') as f:
+                f.write(content)
+
+            updated_files.append(fixed_path)
+
+        # Clean up any existing duplicate files
+        self._cleanup_duplicate_files(project_path, filename_to_paths)
+
+        # Update metadata
+        metadata['files'] = updated_files
+        metadata['modified_at'] = datetime.now().isoformat()
+
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        # Validate consistency
+        self._validate_project_consistency(project_path, metadata.get('app_name'),
+                                           safe_target_name, safe_product_name)
+
+        return True
+
+    def _cleanup_duplicate_files(self, project_path: str, filename_to_paths: Dict[str, str]):
+        """Remove duplicate files that aren't in the approved list"""
         sources_dir = os.path.join(project_path, "Sources")
-
-        files = []
-        if os.path.exists(sources_dir):
-            for root, _, filenames in os.walk(sources_dir):
-                for filename in filenames:
-                    if filename.endswith('.swift'):
-                        file_path = os.path.join(root, filename)
-                        relative_path = os.path.relpath(file_path, project_path)
-
-                        with open(file_path, 'r') as f:
-                            content = f.read()
-
-                        files.append({
-                            "path": relative_path,
-                            "name": filename,
-                            "content": content
-                        })
-
-        return files
+        
+        # Walk through all Swift files in the project
+        for root, dirs, files in os.walk(sources_dir):
+            for file in files:
+                if file.endswith('.swift'):
+                    full_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(full_path, project_path)
+                    
+                    # If this filename exists in our approved list but this isn't the approved path
+                    if file in filename_to_paths and filename_to_paths[file] != relative_path:
+                        print(f"[PROJECT MANAGER] Removing duplicate file: {relative_path}")
+                        try:
+                            os.remove(full_path)
+                        except Exception as e:
+                            print(f"[PROJECT MANAGER] Error removing duplicate: {e}")
 
     async def get_project_path(self, project_id: str) -> Optional[str]:
-        """Get project directory path"""
+        """Get the path to a project"""
         project_path = os.path.join(self.workspaces_dir, project_id)
         if os.path.exists(project_path):
             return project_path
         return None
 
     async def list_projects(self) -> List[Dict]:
-        """List all projects in workspace"""
+        """List all projects with metadata"""
         projects = []
 
-        if os.path.exists(self.workspaces_dir):
-            for project_id in os.listdir(self.workspaces_dir):
-                if project_id.startswith('proj_'):
-                    project_path = os.path.join(self.workspaces_dir, project_id)
-                    metadata_path = os.path.join(project_path, "project.json")
+        if not os.path.exists(self.workspaces_dir):
+            return projects
 
-                    if os.path.exists(metadata_path):
-                        with open(metadata_path, 'r') as f:
-                            metadata = json.load(f)
+        for project_id in os.listdir(self.workspaces_dir):
+            project_path = os.path.join(self.workspaces_dir, project_id)
+            metadata_path = os.path.join(project_path, 'project.json')
 
-                        projects.append({
-                            "project_id": project_id,
-                            "app_name": metadata.get("app_name", "Unknown"),
-                            "bundle_id": metadata.get("bundle_id", "Unknown"),
-                            "product_name": metadata.get("product_name", "Unknown"),
-                            "created_at": metadata.get("created_at", ""),
-                            "last_modified": metadata.get("last_modified", metadata.get("created_at", ""))
-                        })
+            if os.path.isdir(project_path) and os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
 
-        # Sort by last modified date
-        projects.sort(key=lambda x: x.get("last_modified", ""), reverse=True)
+                    projects.append({
+                        'project_id': project_id,
+                        'app_name': metadata.get('app_name', 'Unknown'),
+                        'bundle_id': metadata.get('bundle_id', 'Unknown'),
+                        'created_at': metadata.get('created_at', 'Unknown'),
+                        'modified_at': metadata.get('modified_at', metadata.get('created_at', 'Unknown'))
+                    })
+                except Exception as e:
+                    print(f"[PROJECT MANAGER] Error reading project {project_id}: {e}")
+
+        # Sort by creation date (newest first)
+        projects.sort(key=lambda x: x['created_at'], reverse=True)
+
         return projects
+
+    async def delete_project(self, project_id: str) -> bool:
+        """Delete a project"""
+        project_path = await self.get_project_path(project_id)
+        if project_path:
+            try:
+                shutil.rmtree(project_path)
+                print(f"[PROJECT MANAGER] Deleted project: {project_id}")
+                return True
+            except Exception as e:
+                print(f"[PROJECT MANAGER] Error deleting project {project_id}: {e}")
+        return False

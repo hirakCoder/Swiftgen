@@ -1,0 +1,13 @@
+{
+  "title": "Validation Failure: 2025-06-09 18:29",
+  "content": "Validation failed with 1 errors:\n[BuildabilityValidator] Sources/ViewModels/ReminderViewModel.swift: Missing SwiftUI import",
+  "tags": [
+    "validation",
+    "failure",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

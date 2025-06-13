@@ -1,0 +1,18 @@
+{
+  "title": "New Release: swiftlang/swift - Swift 6.1.2 Release",
+  "content": "Release Notes:\n\n\nDownload: https://github.com/swiftlang/swift/releases/tag/swift-6.1.2-RELEASE",
+  "tags": [
+    "release",
+    "github",
+    "swift",
+    "latest"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Consider updating to latest swiftlang/swift version"
+  ],
+  "source": "github",
+  "repo": "swiftlang/swift",
+  "version": "swift-6.1.2-RELEASE",
+  "url": "https://github.com/swiftlang/swift/releases/tag/swift-6.1.2-RELEASE"
+}

@@ -1,689 +1,466 @@
 import os
 import json
-import httpx
-from typing import Dict, List, Optional, Tuple
-from dotenv import load_dotenv
-import asyncio
-from datetime import datetime
-import random
-import hashlib
+import logging
+import time
 import re
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
+from datetime import datetime
+import anthropic
+import openai
+import requests
+from dotenv import load_dotenv
 
-# Import the base class
-try:
-    from base_llm_service import BaseLLMService
-except ImportError:
-    print("Warning: base_llm_service.py not found. Using fallback implementation.")
-    BaseLLMService = object
-
+# Load environment variables
 load_dotenv()
 
-class EnhancedClaudeService(BaseLLMService):
-    """Enhanced service that coordinates multiple LLMs for better results"""
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@dataclass
+class LLMModel:
+    """Data class for LLM model configuration"""
+    name: str
+    provider: str
+    api_key_env: str
+    model_id: str
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    timeout: int = 30
+
+class EnhancedClaudeService:
+    """Enhanced service for managing multiple LLM providers"""
 
     def __init__(self):
-        super().__init__()
+        """Initialize the enhanced Claude service with all available LLMs"""
+        self.models = {}
+        self.available_models = []
+        self.current_model = None
+        self.api_keys = {}
 
-        # Initialize all LLM services
-        self.claude_api_key = os.getenv("CLAUDE_API_KEY", "")
-        self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
+        # Define ALL supported models - UPDATED WITH CORRECT MODEL NAMES
+        self.supported_models = [
+            LLMModel(
+                name="Claude 3.5 Sonnet",
+                provider="anthropic",
+                api_key_env="CLAUDE_API_KEY",
+                model_id="claude-3-5-sonnet-20241022",  # Latest Claude model
+                max_tokens=8192  # Increased for complete app generation
+            ),
+            LLMModel(
+                name="GPT-4 Turbo",
+                provider="openai",
+                api_key_env="OPENAI_API_KEY",
+                model_id="gpt-4-turbo-preview",
+                max_tokens=4096
+            ),
+            LLMModel(
+                name="xAI Grok",
+                provider="xai",
+                api_key_env="XAI_API_KEY",
+                model_id="grok-beta",
+                max_tokens=4096
+            )
+        ]
 
-        # TEMPORARY FIX: Disable xAI until we have the correct endpoint
-        # self.xai_api_key = os.getenv("XAI_API_KEY", "")
-        self.xai_api_key = ""  # DISABLED until we get proper endpoint
+        # Initialize all available models
+        self._initialize_models()
 
-        self.claude_api_url = "https://api.anthropic.com/v1/messages"
-        self.openai_api_url = "https://api.openai.com/v1/chat/completions"
-        # The xAI endpoint might need to be updated when they provide the correct one
-        self.xai_api_url = "https://api.x.ai/v1/chat/completions"
+        # Log initialization results
+        logger.info(f"Initialized {len(self.available_models)} LLM models out of {len(self.supported_models)} supported")
+        for model in self.available_models:
+            logger.info(f"  - {model.name} ({model.provider}) ✓")
 
-        # Track which LLMs are available
-        self.available_llms = []
-        if self.claude_api_key:
-            self.available_llms.append("claude")
-        if self.openai_api_key:
-            self.available_llms.append("gpt4")
-        # if self.xai_api_key:
-        #     self.available_llms.append("xai")
+        # Set default model if available
+        if self.available_models:
+            self.current_model = self.available_models[0]
+            logger.info(f"Default model set to: {self.current_model.name}")
 
-        print(f"Enhanced Multi-LLM Service initialized with: {', '.join(self.available_llms)}")
-        if os.getenv("XAI_API_KEY"):
-            print("Note: xAI is temporarily disabled due to endpoint issues")
+    def _initialize_models(self):
+        """Initialize all models that have valid API keys"""
+        for model in self.supported_models:
+            api_key = os.getenv(model.api_key_env, "").strip()
+            if api_key:
+                self.api_keys[model.provider] = api_key
+                self.models[model.provider] = model
+                self.available_models.append(model)
+                logger.info(f"✓ Initialized {model.name}")
+            else:
+                logger.warning(f"✗ Skipped {model.name} - No API key found ({model.api_key_env})")
 
-        # System prompts for each LLM
-        self.system_prompts = {
-            "claude": self._get_claude_system_prompt(),
-            "gpt4": self._get_gpt4_system_prompt(),
-            "xai": self._get_xai_system_prompt()
-        }
+    def _initialize_client(self, provider: str):
+        """Initialize API client for the given provider"""
+        try:
+            if provider == "anthropic" and provider not in self._clients:
+                self._clients["anthropic"] = anthropic.Anthropic(api_key=self.api_keys["anthropic"])
+                return True
+            elif provider == "openai" and provider not in self._clients:
+                openai.api_key = self.api_keys["openai"]
+                self._clients["openai"] = openai
+                return True
+            elif provider == "xai" and provider not in self._clients:
+                # xAI client initialization would go here
+                self._clients["xai"] = None  # Placeholder
+                return True
+            return provider in self._clients
+        except Exception as e:
+            logger.error(f"Failed to initialize {provider} client: {str(e)}")
+            return False
 
-    def _get_claude_system_prompt(self):
-        return """You are SwiftGen AI, an expert iOS developer. Create UNIQUE, production-ready SwiftUI apps.
+    def get_available_models(self) -> List[LLMModel]:
+        """Get list of all available models"""
+        return self.available_models
+
+    def set_model(self, provider: str) -> bool:
+        """Set the current model by provider name"""
+        if provider in self.models:
+            self.current_model = self.models[provider]
+            logger.info(f"Switched to model: {self.current_model.name}")
+            return True
+        else:
+            logger.error(f"Provider {provider} not available")
+            return False
+
+    async def generate_ios_app(self, description: str, app_name: str = None) -> Dict[str, Any]:
+        """Generate iOS app code using the best available LLM"""
+        if not self.current_model:
+            raise Exception("No LLM model available")
+
+        # Create the prompt for iOS app generation
+        # Try to use enhanced prompts for better syntax
+        try:
+            from enhanced_prompts import get_generation_prompts
+            system_prompt, user_prompt = get_generation_prompts(app_name or "MyApp", description)
+            # Skip the old user_prompt generation
+            use_enhanced = True
+        except ImportError:
+            use_enhanced = False
+            system_prompt = """You are SwiftGen AI, an expert iOS developer. Create UNIQUE, production-ready SwiftUI apps.
 
 CRITICAL RULES:
 1. Each app must be UNIQUE - use creative approaches, unique UI designs, innovative features
-2. Use @Environment(\.dismiss) NOT @Environment(\.presentationMode) 
+2. Use @Environment(\\.dismiss) NOT @Environment(\\.presentationMode) 
 3. ALWAYS use double quotes " for strings, NEVER single quotes '
 4. Return ONLY valid JSON - no explanatory text before or after
 5. Make apps exceptional, not just functional
 6. NEVER use generic names like "MyApp" - always use the actual app name provided
 7. Only include actual Swift source files in the files array - no JSON, PDF, or asset files
-8. CRITICAL: Use the EXACT bundle ID provided in the prompt - do NOT use generic bundle IDs
+8. Use the EXACT bundle ID format: com.swiftgen.{app_name_lowercase_no_spaces}
 9. ENSURE all files have actual Swift code content - never return empty content strings
+10. ALWAYS import SwiftUI in every Swift file
+11. ALWAYS import Combine when using @Published or ObservableObject
 
 Focus on: Elegant architecture, smooth animations, thoughtful UX, accessibility."""
 
-    def _get_gpt4_system_prompt(self):
-        return """You are an expert iOS developer creating UNIQUE SwiftUI applications.
+        if not use_enhanced:
+            user_prompt = f"""Create a complete iOS app with these requirements:
+App Name: {app_name or "MyApp"}
+Description: {description}
 
-Requirements:
-1. Generate completely unique implementations - be creative and innovative
-2. Modern Swift/SwiftUI patterns only (iOS 15+)
-3. Return ONLY valid JSON format
-4. Add unexpected delightful features
-5. Focus on performance and clean code architecture
-6. NEVER use generic names like "MyApp" - always use the actual app name provided
-7. Only include actual Swift source files in the files array - no JSON, PDF, or asset files
-8. CRITICAL: Use the EXACT bundle ID provided in the prompt
-9. ENSURE all files have actual Swift code content - never return empty content strings
-
-Your strength: Creative problem solving and clean, efficient code patterns."""
-
-    def _get_xai_system_prompt(self):
-        return """You are an innovative iOS developer building unique SwiftUI apps.
-
-Guidelines:
-1. Create distinctive apps with unique approaches
-2. Use cutting-edge SwiftUI features
-3. Return ONLY JSON responses
-4. Think outside the box for UI/UX
-5. Implement features users didn't know they needed
-6. NEVER use generic names like "MyApp" - always use the actual app name provided
-7. Only include actual Swift source files in the files array - no JSON, PDF, or asset files
-8. CRITICAL: Use the EXACT bundle ID provided in the prompt
-9. ENSURE all files have actual Swift code content - never return empty content strings
-
-Your strength: Unconventional solutions and futuristic design thinking."""
-
-    def _ensure_response_has_content(self, response: Dict, safe_bundle_id: str, app_name: str) -> Dict:
-        """Ensure the response has valid files with content"""
-        if "files" in response:
-            valid_files = []
-            for file in response["files"]:
-                # Use parent class method to ensure content
-                if hasattr(super(), '_ensure_file_has_content'):
-                    file = super()._ensure_file_has_content(file, app_name)
-                elif not file.get("content") or not file["content"].strip():
-                    # Fallback if parent method not available
-                    if "App.swift" in file.get("path", ""):
-                        safe_app_name = app_name.replace(" ", "")
-                        file["content"] = f"""import SwiftUI
-
-@main
-struct {safe_app_name}App: App {{
-    var body: some Scene {{
-        WindowGroup {{
-            ContentView()
-        }}
-    }}
-}}"""
-                    elif "ContentView.swift" in file.get("path", ""):
-                        file["content"] = """import SwiftUI
-
-struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}"""
-
-                if file.get("content") and file["content"].strip():
-                    valid_files.append(file)
-
-            response["files"] = valid_files
-
-        # Ensure bundle ID is correct
-        response["bundle_id"] = safe_bundle_id
-
-        return response
-
-    async def generate_ios_app_multi_llm(self, description: str, app_name: Optional[str] = None) -> Dict:
-        """Generate iOS app using the best available LLM or combination"""
-
-        if not self.available_llms:
-            raise ValueError("No LLM API keys configured")
-
-        # Create safe bundle ID
-        safe_bundle_id = self._create_safe_bundle_id(app_name) if app_name else self._create_safe_bundle_id("app")
-
-        # Decide which LLM to use based on request complexity and availability
-        selected_llm = self._select_best_llm_for_task(description)
-
-        print(f"Selected {selected_llm} for app generation based on request analysis")
-
-        # For complex apps, we might want to get perspectives from multiple LLMs
-        if self._is_complex_request(description) and len(self.available_llms) > 1:
-            print("Complex request detected - using multi-LLM approach")
-            return await self._generate_with_multiple_llms(description, app_name, safe_bundle_id)
-        else:
-            # Try the selected LLM first, then fall back to others if it fails
-            last_error = None
-            tried_llms = []
-
-            # Start with the selected LLM
-            llms_to_try = [selected_llm] + [llm for llm in self.available_llms if llm != selected_llm]
-
-            for llm in llms_to_try:
-                try:
-                    print(f"Attempting to generate with {llm}...")
-                    result = await self._generate_with_single_llm(llm, description, app_name, safe_bundle_id)
-                    if result:
-                        # CRITICAL: Ensure files have content
-                        result = self._ensure_response_has_content(result, safe_bundle_id, app_name or "App")
-
-                        print(f"Successfully generated app using {llm}")
-                        result["generated_by_llm"] = llm  # Track which LLM was used
-                        # CRITICAL: Ensure bundle ID is correct
-                        result["bundle_id"] = safe_bundle_id
-                        return result
-                except Exception as e:
-                    last_error = str(e)
-                    tried_llms.append(llm)
-                    print(f"Failed to generate with {llm}: {str(e)}")
-
-                    # Special handling for 404 errors - likely wrong endpoint
-                    if "404" in str(e):
-                        print(f"Note: {llm} returned 404 - check API endpoint configuration")
-
-                    continue
-
-            # If all LLMs failed, raise an informative error
-            raise Exception(f"All LLMs failed to generate app. Tried: {', '.join(tried_llms)}. Last error: {last_error}")
-
-    def _select_best_llm_for_task(self, description: str) -> str:
-        """Select the best LLM based on the task requirements"""
-        desc_lower = description.lower()
-
-        # Claude is best for complex SwiftUI and detailed implementations
-        if any(word in desc_lower for word in ["complex", "advanced", "sophisticated", "detailed"]):
-            if "claude" in self.available_llms:
-                return "claude"
-
-        # GPT-4 is great for creative and unique approaches
-        if any(word in desc_lower for word in ["creative", "unique", "innovative", "fancy"]):
-            if "gpt4" in self.available_llms:
-                return "gpt4"
-
-        # xAI for cutting-edge or futuristic requests (currently disabled)
-        # if any(word in desc_lower for word in ["modern", "cutting-edge", "futuristic", "ai", "ml"]):
-        #     if "xai" in self.available_llms:
-        #         return "xai"
-
-        # Default to available LLM with preference order
-        for llm in ["claude", "gpt4"]:  # Removed xai from default selection
-            if llm in self.available_llms:
-                return llm
-
-        return self.available_llms[0]
-
-    def _is_complex_request(self, description: str) -> bool:
-        """Determine if a request is complex enough to warrant multiple LLMs"""
-        complex_indicators = [
-            "multiple features", "complex", "advanced", "integrate",
-            "real-time", "animation", "gesture", "custom", "sophisticated"
-        ]
-        return any(indicator in description.lower() for indicator in complex_indicators)
-
-    async def _generate_with_multiple_llms(self, description: str, app_name: Optional[str],
-                                           safe_bundle_id: str) -> Dict:
-        """Generate app using multiple LLMs and combine best aspects"""
-
-        tasks = []
-        for llm in self.available_llms[:2]:  # Use top 2 LLMs
-            tasks.append((llm, self._generate_with_single_llm(llm, description, app_name, safe_bundle_id)))
-
-        # Wait for both results
-        results = []
-        for llm, task in tasks:
-            try:
-                result = await task
-                if result:
-                    # Ensure content exists
-                    result = self._ensure_response_has_content(result, safe_bundle_id, app_name or "App")
-                    results.append((llm, result))
-                    print(f"{llm} generated app successfully")
-            except Exception as e:
-                print(f"{llm} failed: {e}")
-
-        if not results:
-            raise Exception("All LLMs failed to generate app")
-
-        # If we have multiple results, combine the best features
-        if len(results) > 1:
-            return self._combine_best_features(results, safe_bundle_id, app_name or "App")
-        else:
-            result = results[0][1]
-            # Ensure bundle ID is correct
-            result["bundle_id"] = safe_bundle_id
-            return result
-
-    async def _generate_with_single_llm(self, llm: str, description: str,
-                                        app_name: Optional[str], safe_bundle_id: str) -> Dict:
-        """Generate app using a specific LLM"""
-
-        prompt = self._create_generation_prompt(description, app_name, safe_bundle_id, llm)
-
-        if llm == "claude":
-            return await self._call_claude(prompt, safe_bundle_id)
-        elif llm == "gpt4":
-            return await self._call_gpt4(prompt, safe_bundle_id)
-        elif llm == "xai":
-            # Currently disabled
-            raise ValueError("xAI is temporarily disabled due to endpoint issues")
-        else:
-            raise ValueError(f"Unknown LLM: {llm}")
-
-    def _create_generation_prompt(self, description: str, app_name: Optional[str],
-                                  safe_bundle_id: str, llm: str) -> str:
-        """Create LLM-specific generation prompt"""
-
-        unique_seed = hashlib.md5(f"{datetime.now().isoformat()}{description}{random.random()}{llm}".encode()).hexdigest()[:8]
-
-        # Use the actual app name, not "MyApp"
-        actual_app_name = app_name if app_name else "App"
-
-        base_prompt = f"""Create a UNIQUE SwiftUI iOS app based on this request: "{description}"
-
-App Name: {actual_app_name}
-
-UNIQUENESS REQUIREMENT: Even if someone else asks for the same type of app, yours must be completely different in:
-- Visual design and color scheme
-- Layout and navigation approach
-- Feature set and capabilities
-- Animations and interactions
-- Overall user experience
-
-TECHNICAL REQUIREMENTS:
-- Bundle ID must be EXACTLY: {safe_bundle_id}
-- Use modern SwiftUI (iOS 15+)
-- All interactive elements must have working implementations
-- Use proper Swift syntax (double quotes, etc.)
-- IMPORTANT: Use "{actual_app_name}" as the app name, NOT "MyApp"
-- CRITICAL: Only include actual Swift source files (ending in .swift) in the files array
-- Do NOT include asset files (JSON, PDF, images) in the files array
-- ENSURE all files have actual Swift code content - no empty strings
-
-UNIQUE SEED: {unique_seed}
-
-Return ONLY a valid JSON object:
+Return a JSON response with this EXACT structure:
 {{
     "files": [
         {{
             "path": "Sources/App.swift",
-            "content": "import SwiftUI\\n\\n@main\\nstruct {actual_app_name.replace(' ', '')}App: App {{ ... // COMPLETE CODE }}"
+            "content": "// Full Swift code here"
         }},
         {{
-            "path": "Sources/ContentView.swift",
-            "content": "// Your COMPLETE implementation with actual Swift code"
+            "path": "Sources/ContentView.swift", 
+            "content": "// Full Swift code here"
         }}
-        // Only .swift files, no assets or config files
     ],
-    "features": [...],
-    "bundle_id": "{safe_bundle_id}",
-    "app_name": "{actual_app_name}",
-    "unique_aspects": "..."
+    "bundle_id": "com.swiftgen.{app_name.lower().replace(' ', '') if app_name else 'app'}",
+    "features": ["Feature 1", "Feature 2"],
+    "unique_aspects": "What makes this implementation unique",
+    "app_name": "{app_name or 'MyApp'}",
+    "product_name": "{app_name.replace(' ', '') if app_name else 'MyApp'}"
 }}"""
 
-        # Add LLM-specific flavor
-        if llm == "gpt4":
-            base_prompt += "\n\nFocus on: Creative UI patterns, clean architecture, delightful micro-interactions"
-        elif llm == "xai":
-            base_prompt += "\n\nFocus on: Futuristic design, AI-powered features, cutting-edge SwiftUI capabilities"
+        try:
+            result = await self._generate_with_current_model(system_prompt, user_prompt)
 
-        return base_prompt
+            # Parse JSON response
+            if isinstance(result, str):
+                # Clean the response to ensure it's valid JSON
+                result = result.strip()
+                if result.startswith("```json"):
+                    result = result[7:]
+                if result.endswith("```"):
+                    result = result[:-3]
+                result = json.loads(result)
+            
+            # Check for truncated code
+            if "files" in result:
+                for file in result["files"]:
+                    content = file.get("content", "")
+                    if "..." in content and re.search(r'(class|struct|enum)\s+\w+\.\.\.', content):
+                        logger.warning(f"Detected truncated code in {file.get('path', 'unknown')}")
+                        raise Exception("Generated code appears to be truncated. Retrying with higher token limit...")
 
-    async def _call_claude(self, prompt: str, safe_bundle_id: str = "") -> Dict:
-        """Call Claude API"""
-        if not self.claude_api_key:
-            raise ValueError("Claude API key not configured")
+            return result
 
-        headers = {
-            "x-api-key": self.claude_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
+        except Exception as e:
+            logger.error(f"Generation failed with {self.current_model.name}: {str(e)}")
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                self.claude_api_url,
-                headers=headers,
-                json={
-                    "model": "claude-3-opus-20240229",
-                    "system": self.system_prompts["claude"],
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 4096,
-                    "temperature": 0.8  # Higher for more creativity
-                }
-            )
+            # Try with next available model
+            for model in self.available_models:
+                if model != self.current_model:
+                    self.current_model = model
+                    logger.info(f"Retrying with {model.name}")
+                    try:
+                        return await self.generate_ios_app(description, app_name)
+                    except:
+                        continue
 
-            if response.status_code == 200:
-                result = response.json()
-                content = result['content'][0]['text']
+            raise Exception(f"All LLM models failed. Last error: {str(e)}")
 
-                # DEBUG: Print Claude's response
-                print("\n=== CLAUDE'S RESPONSE (first 1000 chars) ===")
-                print(content[:1000])
-                print("=== END RESPONSE PREVIEW ===\n")
+    async def _generate_with_current_model(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate text using the current model"""
+        if self.current_model.provider == "anthropic":
+            return await self._generate_claude(system_prompt, user_prompt)
+        elif self.current_model.provider == "openai":
+            return await self._generate_openai(system_prompt, user_prompt)
+        elif self.current_model.provider == "xai":
+            return await self._generate_xai(system_prompt, user_prompt)
+        else:
+            raise Exception(f"Unknown provider: {self.current_model.provider}")
 
-                # Use base class parsing WITH the safe_bundle_id
-                parsed_result = await self.parse_llm_response(content, safe_bundle_id)
+    async def _generate_claude(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate text using Claude"""
+        import anthropic
 
-                # CRITICAL: Double-check bundle ID is correct
-                if parsed_result and parsed_result.get("bundle_id") != safe_bundle_id:
-                    print(f"WARNING: Fixing bundle ID from {parsed_result.get('bundle_id')} to {safe_bundle_id}")
-                    parsed_result["bundle_id"] = safe_bundle_id
+        client = anthropic.Anthropic(api_key=self.api_keys["anthropic"])
 
-                return parsed_result
-            else:
-                raise Exception(f"Claude API error: {response.status_code}")
+        message = client.messages.create(
+            model=self.current_model.model_id,
+            max_tokens=self.current_model.max_tokens,
+            temperature=self.current_model.temperature,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ]
+        )
 
-    async def _call_gpt4(self, prompt: str, safe_bundle_id: str = "") -> Dict:
-        """Call GPT-4 API"""
-        if not self.openai_api_key:
-            raise ValueError("OpenAI API key not configured")
+        return message.content[0].text
 
-        headers = {
-            "Authorization": f"Bearer {self.openai_api_key}",
-            "Content-Type": "application/json"
-        }
+    async def _generate_openai(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate text using OpenAI"""
+        import openai
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                self.openai_api_url,
-                headers=headers,
-                json={
-                    "model": "gpt-4-turbo-preview",
-                    "messages": [
-                        {"role": "system", "content": self.system_prompts["gpt4"]},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 4096,
-                    "response_format": {"type": "json_object"}
-                }
-            )
+        openai.api_key = self.api_keys["openai"]
 
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
+        response = openai.ChatCompletion.create(
+            model=self.current_model.model_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=self.current_model.max_tokens,
+            temperature=self.current_model.temperature
+        )
 
-                # Use base class parsing WITH the safe_bundle_id
-                parsed_result = await self.parse_llm_response(content, safe_bundle_id)
+        return response.choices[0].message.content
 
-                # CRITICAL: Double-check bundle ID is correct
-                if parsed_result and parsed_result.get("bundle_id") != safe_bundle_id:
-                    print(f"WARNING: Fixing bundle ID from {parsed_result.get('bundle_id')} to {safe_bundle_id}")
-                    parsed_result["bundle_id"] = safe_bundle_id
+    async def _generate_xai(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate text using xAI"""
+        # Placeholder for xAI implementation
+        raise NotImplementedError("xAI integration pending")
 
-                return parsed_result
-            else:
-                raise Exception(f"GPT-4 API error: {response.status_code}")
+    def generate_text(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        """Synchronous wrapper for compatibility"""
+        import asyncio
 
-    async def _call_xai(self, prompt: str, safe_bundle_id: str = "") -> Dict:
-        """Call xAI API - CURRENTLY DISABLED"""
-        raise ValueError("xAI is temporarily disabled due to endpoint issues")
+        async def _async_generate():
+            result = await self._generate_with_current_model("You are a helpful assistant.", prompt)
+            return {"success": True, "text": result}
 
-    def _combine_best_features(self, results: List[Tuple[str, Dict]], safe_bundle_id: str, app_name: str) -> Dict:
-        """Intelligently combine the best features from multiple LLM results"""
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(_async_generate())
+        except Exception as e:
+            return {"success": False, "error": str(e), "text": ""}
+        finally:
+            loop.close()
 
-        print("Combining best features from multiple LLMs...")
+    # Optional: Add these methods if your main.py expects them
+    async def generate_ios_app_multi_llm(self, description: str, app_name: str = None) -> Dict[str, Any]:
+        """Alias for compatibility"""
+        return await self.generate_ios_app(description, app_name)
 
-        # For now, we'll prefer Claude's code structure but might take features from others
-        primary_result = None
-        for llm, result in results:
-            if llm == "claude":
-                primary_result = result
-                break
-
-        if not primary_result:
-            primary_result = results[0][1]
-
-        # Ensure primary result has content
-        primary_result = self._ensure_response_has_content(primary_result, safe_bundle_id, app_name)
-
-        # Combine unique features from all results
-        all_features = []
-        all_unique_aspects = []
-
-        for llm, result in results:
-            all_features.extend(result.get("features", []))
-            aspect = result.get("unique_aspects", "")
-            if aspect:
-                all_unique_aspects.append(f"{llm}: {aspect}")
-
-        primary_result["features"] = list(set(all_features))  # Remove duplicates
-        primary_result["unique_aspects"] = " | ".join(all_unique_aspects)
-        primary_result["bundle_id"] = safe_bundle_id  # ENSURE correct bundle ID
-        primary_result["multi_llm_generated"] = True
-
-        return primary_result
-
-    def _create_unique_seed(self) -> str:
-        """Create a unique seed for variation"""
-        return hashlib.md5(
-            f"{datetime.now().isoformat()}{random.random()}".encode()
-        ).hexdigest()[:8]
-
-    async def modify_ios_app_multi_llm(self, app_name: str, original_description: str,
-                                       modification_request: str, existing_files: List[Dict],
-                                       existing_bundle_id: str) -> Dict:
-        """Modify app using the best LLM for the specific modification"""
-
-        # Analyze modification to select best LLM
-        selected_llm = self._select_best_llm_for_modification(modification_request)
-
-        print(f"Selected {selected_llm} for modification: {modification_request[:50]}...")
-
-        # Try selected LLM first, then fall back to others
-        last_error = None
-        tried_llms = []
-
-        llms_to_try = [selected_llm] + [llm for llm in self.available_llms if llm != selected_llm]
-
-        for llm in llms_to_try:
-            try:
-                print(f"Attempting modification with {llm}...")
-
-                prompt = self._create_modification_prompt(
-                    app_name, original_description, modification_request,
-                    existing_files, existing_bundle_id, llm
-                )
-
-                # For modifications, we need to call the LLM with the modification prompt
-                if llm == "claude":
-                    result = await self._call_claude(prompt, existing_bundle_id)
-                elif llm == "gpt4":
-                    result = await self._call_gpt4(prompt, existing_bundle_id)
-                else:
-                    continue  # Skip xAI for now
-
-                if result:
-                    # Ensure files have content
-                    result = self._ensure_response_has_content(result, existing_bundle_id, app_name)
-
-                    # Ensure bundle ID consistency
-                    result["bundle_id"] = existing_bundle_id
-                    result["modified_by_llm"] = llm
-                    print(f"Successfully modified app using {llm}")
-                    return result
-
-            except Exception as e:
-                last_error = str(e)
-                tried_llms.append(llm)
-                print(f"Failed to modify with {llm}: {str(e)}")
-                continue
-
-        # If all LLMs failed
-        raise Exception(f"All LLMs failed to modify app. Tried: {', '.join(tried_llms)}. Last error: {last_error}")
-
-    def _select_best_llm_for_modification(self, modification_request: str) -> str:
-        """Select best LLM based on modification type"""
-        mod_lower = modification_request.lower()
-
-        # Claude for complex SwiftUI modifications
-        if any(word in mod_lower for word in ["swiftui", "animation", "gesture", "state", "binding"]):
-            if "claude" in self.available_llms:
-                return "claude"
-
-        # GPT-4 for feature additions and refactoring
-        if any(word in mod_lower for word in ["add", "feature", "refactor", "improve", "enhance"]):
-            if "gpt4" in self.available_llms:
-                return "gpt4"
-
-        # xAI for innovative modifications (currently disabled)
-        # if any(word in mod_lower for word in ["ai", "ml", "innovative", "modern", "redesign"]):
-        #     if "xai" in self.available_llms:
-        #         return "xai"
-
-        return self.available_llms[0]
-
-    def _create_modification_prompt(self, app_name: str, original_description: str,
-                                    modification_request: str, existing_files: List[Dict],
-                                    existing_bundle_id: str, llm: str) -> str:
-        """Create LLM-specific modification prompt"""
-
+    async def modify_ios_app(self, app_name: str, description: str, modification: str,
+                             files: List[Dict], existing_bundle_id: str = None,
+                             project_tracking_id: str = None) -> Dict[str, Any]:
+        """Modify an existing iOS app with intelligent modification handling"""
+        
+        # Create comprehensive file context with FULL content
         code_context = "\n\n".join([
             f"File: {file['path']}\n```swift\n{file['content']}\n```"
-            for file in existing_files
+            for file in files
         ])
 
-        # Intelligent analysis of the modification
-        additional_context = self._analyze_modification_request(modification_request)
+        # Analyze modification request
+        modification_type = self._analyze_modification_type(modification)
+        
+        system_prompt = f"""You are SwiftGen AI, an expert iOS developer. 
+{modification_type['guidance']}
 
-        return f"""Modify this iOS app: "{modification_request}"
+IMPORTANT RULES:
+1. ONLY modify what is requested - do NOT rebuild the entire app
+2. Keep all existing functionality unless explicitly asked to change it
+3. Maintain the same app structure and architecture
+4. Return ALL files with their complete content (modified or unchanged)
+5. Do NOT change the app name or bundle ID"""
 
-Current app: {app_name} (NOT "MyApp")
-Original purpose: {original_description}
+        user_prompt = f"""Current iOS App: {app_name}
+Original Description: {description}
+Modification Request: {modification}
 
-{additional_context}
-
-Current code:
+EXISTING CODE (DO NOT REBUILD FROM SCRATCH):
 {code_context}
 
 Requirements:
-1. Make the requested changes while maintaining app integrity
+1. Make ONLY the requested changes: "{modification}"
 2. Keep bundle ID: {existing_bundle_id}
-3. Keep app name: {app_name} (do NOT change to "MyApp")
-4. Ensure all modifications are fully functional
-5. Add creative improvements where appropriate
-6. CRITICAL: Only include actual Swift source files (ending in .swift) in the files array
-7. Do NOT include asset files (JSON, PDF, images) in the files array
-8. ENSURE all files have actual Swift code content - no empty strings
+3. Keep app name: {app_name}
+4. Return ALL files (both modified and unmodified)
+5. Add comment "// Modified for: {modification[:50]}..." at the top of changed files
 
-Return ONLY valid JSON with complete modified code:
+Return valid JSON with this structure:
 {{
     "files": [
         {{
             "path": "Sources/filename.swift",
-            "content": "// Complete modified Swift code - NOT EMPTY"
+            "content": "// Complete Swift code"
         }}
-        // Only .swift files with actual content
     ],
-    "features": ["Original features", "NEW: Changes made"],
     "bundle_id": "{existing_bundle_id}",
-    "app_name": "{app_name}",
-    "modification_summary": "What was changed"
-}}"""
+    "features": ["List of features including new ones"],
+    "modification_summary": "Brief summary of what was changed",
+    "changes_made": ["Specific changes applied"]
+}}
 
-    def _analyze_modification_request(self, modification_request: str) -> str:
-        """Analyze modification request to provide intelligent context"""
+CRITICAL JSON FORMATTING RULES:
+- Use double quotes for all strings
+- Escape quotes inside strings as \\"
+- Escape newlines as \\n
+- Escape backslashes as \\\\
+- No text before or after the JSON
+- Ensure valid, parseable JSON"""
 
-        request_lower = modification_request.lower()
-        additional_instructions = ""
+        result = await self._generate_with_current_model(system_prompt, user_prompt)
 
-        if any(phrase in request_lower for phrase in ["not work", "doesn't work", "broken", "not functioning"]):
-            if "button" in request_lower or "click" in request_lower or "tap" in request_lower:
-                additional_instructions = """
-INTELLIGENT ANALYSIS: User reports interactive element not functioning.
+        if isinstance(result, str):
+            result = result.strip()
+            if result.startswith("```json"):
+                result = result[7:]
+            if result.endswith("```"):
+                result = result[:-3]
+            
+            # Clean up common JSON issues before parsing
+            try:
+                # First attempt - direct parsing
+                result = json.loads(result)
+            except json.JSONDecodeError as e:
+                print(f"[ERROR] Initial JSON parse failed: {e}")
+                print(f"[ERROR] Error at position: {e.pos if hasattr(e, 'pos') else 'unknown'}")
+                
+                try:
+                    # Second attempt - fix common escape issues
+                    cleaned = result
+                    # Fix unescaped newlines and tabs in strings
+                    import re
+                    # Find string values and fix their escapes
+                    def fix_string_escapes(match):
+                        s = match.group(1)
+                        s = s.replace('\n', '\\n').replace('\t', '\\t')
+                        s = s.replace('\\', '\\\\').replace('"', '\\"')
+                        return f'"{s}"'
+                    
+                    # This regex finds string values in JSON
+                    cleaned = re.sub(r'"([^"\\]*(\\.[^"\\]*)*)"', fix_string_escapes, cleaned)
+                    
+                    result = json.loads(cleaned)
+                except json.JSONDecodeError as e2:
+                    print(f"[ERROR] Second JSON parse failed: {e2}")
+                    
+                    # Third attempt - extract JSON object
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        try:
+                            result = json.loads(json_match.group(0))
+                        except Exception as e3:
+                            print(f"[ERROR] Third JSON parse failed: {e3}")
+                            # If all parsing fails, create a minimal response
+                            return {
+                                "app_name": app_name,
+                                "bundle_id": existing_bundle_id,
+                                "files": files,  # Return original files
+                                "modification_summary": "Failed to parse modification response",
+                                "changes_made": ["Error: Could not parse LLM response"],
+                                "modified_by_llm": self.current_model.provider if self.current_model else "claude"
+                            }
+                    else:
+                        print("[ERROR] No JSON object found in response")
+                        return {
+                            "app_name": app_name,
+                            "bundle_id": existing_bundle_id,
+                            "files": files,
+                            "modification_summary": "Failed to parse modification response",
+                            "changes_made": ["Error: No valid JSON in response"],
+                            "modified_by_llm": self.current_model.provider if self.current_model else "claude"
+                        }
 
-DEBUGGING APPROACH:
-1. Identify the non-functioning UI element
-2. Check for empty or missing action closures
-3. Ensure state changes trigger UI updates
-4. Verify all user interactions produce visible results
-"""
-            elif "display" in request_lower or "show" in request_lower:
-                additional_instructions = """
-INTELLIGENT ANALYSIS: User reports display/update issues.
+        # Ensure consistency
+        if isinstance(result, dict):
+            result["bundle_id"] = existing_bundle_id
+            result["app_name"] = app_name
+            result["modified_by_llm"] = self.current_model.provider if self.current_model else "claude"
+        else:
+            # If result is not a dict at this point, something went wrong
+            print(f"[ERROR] Result is not a dict: {type(result)}")
+            return {
+                "app_name": app_name,
+                "bundle_id": existing_bundle_id,
+                "files": files,
+                "modification_summary": "Failed to process modification",
+                "changes_made": ["Error: Invalid response format"],
+                "modified_by_llm": self.current_model.provider if self.current_model else "claude"
+            }
+        
+        return result
 
-Check:
-1. Data binding connections
-2. @State/@Published variable updates
-3. View refresh triggers
-"""
-
-        return additional_instructions
-
-    def _get_fallback_llm_config(self) -> Dict:
-        """Get fallback configuration when xAI is not properly configured"""
-        # Provide hardcoded fallback to Claude or GPT-4 if xAI is misconfigured
-        fallback_order = []
-
-        if "claude" in self.available_llms:
-            fallback_order.append("claude")
-        if "gpt4" in self.available_llms:
-            fallback_order.append("gpt4")
-
-        return {
-            "primary": fallback_order[0] if fallback_order else None,
-            "fallback_order": fallback_order
-        }
-
-    def _parse_ai_response(self, response: str, swift_files: List[Dict]) -> List[Dict]:
-        """Parse AI response to extract fixed files"""
-
-        # Try to parse as JSON first
-        try:
-            result = json.loads(response)
-            if "files" in result:
-                # Ensure files have content before returning
-                valid_files = []
-                for file in result["files"]:
-                    if file.get("content") and file["content"].strip():
-                        valid_files.append(file)
-                return valid_files
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract Swift code blocks
-        swift_blocks = re.findall(r'```swift(.*?)```', response, re.DOTALL)
-
-        if swift_blocks:
-            # Match blocks to original files
-            fixed_files = []
-            for file in swift_files:
-                # Try to find corresponding code block
-                for block in swift_blocks:
-                    # Simple heuristic: check if file contains key identifiers
-                    if "@main" in file["content"] and "@main" in block:
-                        fixed_files.append({
-                            "path": file["path"],
-                            "content": block.strip()
-                        })
-                        break
-                    elif "ContentView" in file["path"] and "ContentView" in block:
-                        fixed_files.append({
-                            "path": file["path"],
-                            "content": block.strip()
-                        })
-                        break
-
-            if fixed_files:
-                return fixed_files
-
-        return None
+    async def modify_ios_app_multi_llm(self, *args, **kwargs):
+        """Alias for compatibility"""
+        return await self.modify_ios_app(*args, **kwargs)
+    
+    def _analyze_modification_type(self, modification: str) -> Dict[str, str]:
+        """Analyze the modification request to provide better guidance"""
+        mod_lower = modification.lower()
+        
+        if any(word in mod_lower for word in ["theme", "dark", "color", "style"]):
+            return {
+                "type": "ui_theme",
+                "guidance": "You're modifying UI theme/colors. Focus on Color assets, view modifiers, and appearance settings. Do NOT change app functionality."
+            }
+        elif any(word in mod_lower for word in ["add button", "add feature", "new screen"]):
+            return {
+                "type": "feature_addition",
+                "guidance": "You're adding a new feature. Integrate it smoothly with existing code without disrupting current functionality."
+            }
+        elif any(word in mod_lower for word in ["fix", "bug", "error", "crash"]):
+            return {
+                "type": "bug_fix",
+                "guidance": "You're fixing a bug. Focus on the specific issue without changing unrelated code."
+            }
+        elif any(word in mod_lower for word in ["improve", "enhance", "optimize"]):
+            return {
+                "type": "enhancement",
+                "guidance": "You're enhancing existing functionality. Make targeted improvements without rebuilding."
+            }
+        else:
+            return {
+                "type": "general",
+                "guidance": "Make the requested modification while preserving all existing functionality."
+            }

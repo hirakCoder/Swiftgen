@@ -1,0 +1,18 @@
+{
+  "title": "Avoiding Swift Reserved Type Conflicts",
+  "content": "\n                    CRITICAL: Never use these as struct/class names:\n                    - Task \u2192 Use TodoItem, UserTask, WorkItem, ActivityItem\n                    - State \u2192 Use AppState, ViewState, FeatureState, UIState\n                    - Action \u2192 Use AppAction, ViewAction, FeatureAction, UserAction\n                    - Result \u2192 Use OperationResult, ProcessResult\n                    - Error \u2192 Use AppError, ValidationError\n                    \n                    Example fixes:\n                    // WRONG\n                    struct Task {\n                        let id: UUID\n                        let title: String\n                    }\n                    \n                    // CORRECT\n                    struct TodoItem {\n                        let id: UUID\n                        let title: String\n                    }\n                    \n                    // For state management\n                    struct AppState {\n                        var todos: [TodoItem] = []\n                        var isLoading = false\n                    }\n                    \n                    // For actions\n                    enum AppAction {\n                        case addTodo(TodoItem)\n                        case deleteTodo(UUID)\n                        case toggleComplete(UUID)\n                    }\n                ",
+  "tags": [
+    "naming",
+    "reserved-types",
+    "conflicts",
+    "Task",
+    "State",
+    "Action"
+  ],
+  "severity": "critical",
+  "solutions": [
+    "Always use semantic names that describe the purpose",
+    "Add prefixes or suffixes to avoid conflicts",
+    "Use type aliases if needed for clarity"
+  ]
+}

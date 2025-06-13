@@ -1,0 +1,18 @@
+{
+  "title": "New Release: apple/swift-package-manager - Swift 6.1.1 Release",
+  "content": "Release Notes:\n## What's Changed\r\n* [6.1.1] Ensure prebuilt Modules include path added to generated modules (#8485) by @dschaefer2 in https://github.com/swiftlang/swift-package-manager/pull/8526\r\n* Bump the Swift version to 6.1.1 by @shahmishal in https://github.com/swiftlang/swift-package-manager/pull/8455\r\n\r\n\r\n**Full Changelog**: https://github.com/swiftlang/swift-package-manager/compare/swift-6.1-RELEASE...swift-6.1.1-RELEASE\n\nDownload: https://github.com/swiftlang/swift-package-manager/releases/tag/swift-6.1.1-RELEASE",
+  "tags": [
+    "release",
+    "github",
+    "swift-package-manager",
+    "latest"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Consider updating to latest apple/swift-package-manager version"
+  ],
+  "source": "github",
+  "repo": "apple/swift-package-manager",
+  "version": "swift-6.1.1-RELEASE",
+  "url": "https://github.com/swiftlang/swift-package-manager/releases/tag/swift-6.1.1-RELEASE"
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Validation Failure: 2025-06-13 15:25",
+  "content": "Validation failed with 2 errors:\n[DependencyValidator] Sources/ViewModels/BirthdayViewModel.swift: Found phantom dependency: .shared.\n[DependencyValidator] Sources/Services/NotificationManager.swift: Found phantom dependency: import UserNotifications",
+  "tags": [
+    "validation",
+    "failure",
+    "DependencyValidator",
+    "DependencyValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

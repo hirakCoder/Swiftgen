@@ -1,319 +1,602 @@
+import subprocess
+import time
 import os
-import asyncio
+import re
 import json
-from typing import Tuple, Optional, List, Dict
+import logging
+from pathlib import Path
+from typing import Optional, List, Dict, Tuple
+from dataclasses import dataclass
+from enum import Enum
+import asyncio
+import tempfile
+import shutil
+
+class SimulatorState(Enum):
+    """Simulator state enumeration"""
+    SHUTDOWN = "Shutdown"
+    BOOTING = "Booting"
+    BOOTED = "Booted"
+    UNKNOWN = "Unknown"
+
+@dataclass
+class SimulatorDevice:
+    """Represents a simulator device"""
+    udid: str
+    name: str
+    state: SimulatorState
+    runtime: str
+    device_type: str
+    is_available: bool = True
+
+class SimulatorError(Exception):
+    """Custom exception for simulator-related errors"""
+    pass
 
 class SimulatorService:
-    """Service for managing iOS Simulator operations"""
+    """Production-ready service for managing iOS simulators"""
 
-    def __init__(self):
-        self.default_device_type = "iPhone 16 Pro"
-        self.fallback_devices = ["iPhone 16", "iPhone 15", "iPhone 14"]
+    def __init__(self, logger: Optional[logging.Logger] = None):
+        self.logger = logger or logging.getLogger(__name__)
+        self._active_device: Optional[SimulatorDevice] = None
+        self._retry_attempts = 3
+        self._retry_delay = 2.0
+        self._boot_timeout = 60
+        self._install_timeout = 120  # Increased from 30 to 120 seconds
+        self._launch_timeout = 60   # Increased from 30 to 60 seconds
 
-    async def ensure_simulator_booted(self) -> Tuple[bool, Optional[str], str]:
-        """Ensure iOS simulator is booted and ready"""
-
-        print("Checking simulator status...")
-
-        # First check if any simulator is already booted
-        booted_device = await self._get_booted_device_id()
-
-        if booted_device:
-            device_info = await self._get_device_info(booted_device)
-            print(f"Using already booted simulator: {device_info}")
-            return True, booted_device, f"Simulator ready: {device_info}"
-
-        # No booted device, try to boot one
-        print("No booted simulator found. Attempting to boot simulator...")
-
-        # Get available devices
-        available_devices = await self._get_available_devices()
-
-        # Try to boot preferred device
-        device_to_boot = None
-        device_name = None
-
-        for device_type in [self.default_device_type] + self.fallback_devices:
-            if device_type in available_devices:
-                device_to_boot = available_devices[device_type]
-                device_name = device_type
-                break
-
-        if not device_to_boot:
-            # Use first available iOS device
-            for name, device_id in available_devices.items():
-                device_to_boot = device_id
-                device_name = name
-                break
-
-        if not device_to_boot:
-            return False, None, "No iOS simulators available"
-
-        # Boot the device
-        print(f"Booting {device_name} simulator...")
-
-        boot_cmd = ['xcrun', 'simctl', 'boot', device_to_boot]
-        process = await asyncio.create_subprocess_exec(
-            *boot_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        stdout, stderr = await process.communicate()
-
-        # Check if boot was successful or device was already booted
-        if process.returncode == 0 or "already booted" in stderr.decode().lower():
-            # Open Simulator app
-            await self._open_simulator_app()
-
-            # Wait for simulator to be ready
-            await asyncio.sleep(3)
-
-            return True, device_to_boot, f"Simulator booted: {device_name}"
-        else:
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            return False, None, f"Failed to boot simulator: {error_msg}"
-
-    async def install_and_launch_app(self, app_path: str, bundle_id: str,
-                                     status_callback=None) -> Tuple[bool, str]:
-        """Install and launch app in simulator with enhanced debugging"""
-
-        print(f"[SIMULATOR] Installing app:")
-        print(f"  App Path: {app_path}")
-        print(f"  Bundle ID: {bundle_id}")
-
-        # Verify app bundle structure
-        if not os.path.exists(app_path):
-            return False, f"App bundle not found at: {app_path}"
-
-        # Check for the executable inside the app bundle
-        app_name = os.path.basename(app_path).replace('.app', '')
-        executable_path = os.path.join(app_path, app_name)
-
-        print(f"[SIMULATOR] Checking for executable at: {executable_path}")
-
-        if not os.path.exists(executable_path):
-            # List contents of app bundle for debugging
-            print(f"[SIMULATOR] App bundle contents:")
-            try:
-                contents = os.listdir(app_path)
-                for item in contents:
-                    item_path = os.path.join(app_path, item)
-                    if os.path.isfile(item_path):
-                        # Check if it's executable
-                        is_exec = os.access(item_path, os.X_OK)
-                        print(f"  - {item} {'(executable)' if is_exec else ''}")
-                    else:
-                        print(f"  - {item}/ (directory)")
-
-                # Check if there's a different executable name
-                executables = [f for f in contents if os.path.isfile(os.path.join(app_path, f))
-                               and os.access(os.path.join(app_path, f), os.X_OK)]
-
-                if executables:
-                    print(f"[SIMULATOR] Found executables: {executables}")
-
-                    # Check Info.plist for the actual executable name
-                    info_plist_path = os.path.join(app_path, "Info.plist")
-                    if os.path.exists(info_plist_path):
-                        try:
-                            # Try to read Info.plist to find CFBundleExecutable
-                            import plistlib
-                            with open(info_plist_path, 'rb') as f:
-                                plist = plistlib.load(f)
-                                actual_exec = plist.get('CFBundleExecutable', '')
-                                print(f"[SIMULATOR] Info.plist CFBundleExecutable: {actual_exec}")
-                        except Exception as e:
-                            print(f"[SIMULATOR] Error reading Info.plist: {e}")
-
-                    return False, f"Expected executable '{app_name}' not found, but found: {', '.join(executables)}. This indicates a mismatch between app name and PRODUCT_NAME in build settings."
-                else:
-                    return False, f"No executable found in app bundle. Build may have failed to produce an executable."
-
-            except Exception as e:
-                return False, f"Error inspecting app bundle: {str(e)}"
-
+    async def list_available_devices(self) -> List[SimulatorDevice]:
+        """List all available iOS simulator devices"""
         try:
-            # Get booted device
-            device_id = await self._get_booted_device_id()
-            if not device_id:
-                return False, "No booted simulator found"
+            result = await self._run_command(["xcrun", "simctl", "list", "devices", "--json"])
+            devices_data = json.loads(result.stdout)
 
-            # Install app
-            if status_callback:
-                await status_callback("Installing app to simulator...")
+            devices = []
+            for runtime, runtime_devices in devices_data.get("devices", {}).items():
+                if "iOS" in runtime:
+                    for device in runtime_devices:
+                        if device.get("isAvailable", True):
+                            devices.append(SimulatorDevice(
+                                udid=device["udid"],
+                                name=device["name"],
+                                state=SimulatorState(device.get("state", "Unknown")),
+                                runtime=runtime,
+                                device_type=device.get("deviceTypeIdentifier", ""),
+                                is_available=device.get("isAvailable", True)
+                            ))
 
-            print(f"[SIMULATOR] Running: xcrun simctl install {device_id} {app_path}")
-
-            install_cmd = ['xcrun', 'simctl', 'install', device_id, app_path]
-            process = await asyncio.create_subprocess_exec(
-                *install_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
-                print(f"[SIMULATOR] Install failed: {error_msg}")
-
-                # Parse specific error messages
-                if "is missing its bundle executable" in error_msg:
-                    # Extract the expected executable name from error
-                    import re
-                    match = re.search(r'"([^"]+\.app)/([^"]+)"', error_msg)
-                    if match:
-                        expected_exec = match.group(2)
-                        return False, f"App installation failed: Expected executable '{expected_exec}' not found in app bundle. Check PRODUCT_NAME in build settings."
-
-                return False, f"Failed to install app: {error_msg}"
-
-            print(f"[SIMULATOR] App installed successfully")
-
-            # Launch app
-            if status_callback:
-                await status_callback("Launching app...")
-
-            print(f"[SIMULATOR] Running: xcrun simctl launch {device_id} {bundle_id}")
-
-            launch_cmd = ['xcrun', 'simctl', 'launch', device_id, bundle_id]
-            process = await asyncio.create_subprocess_exec(
-                *launch_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
-                print(f"[SIMULATOR] Launch failed: {error_msg}")
-
-                # Try to get more info about why launch failed
-                if "FBSOpenApplicationServiceErrorDomain" in error_msg:
-                    return False, f"App launch failed - bundle ID mismatch or app not properly installed. Verify bundle ID: {bundle_id}"
-                else:
-                    return False, f"Failed to launch app: {error_msg}"
-
-            print(f"[SIMULATOR] App launched successfully")
-            return True, "App installed and launched successfully"
+            # Sort by iOS version (newest first) and then by device name
+            devices.sort(key=lambda d: (self._extract_ios_version(d.runtime), d.name), reverse=True)
+            return devices
 
         except Exception as e:
-            print(f"[SIMULATOR] Exception during install/launch: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False, f"Error during install/launch: {str(e)}"
+            self.logger.error(f"Failed to list devices: {e}")
+            raise SimulatorError(f"Failed to list simulator devices: {e}")
 
-    async def _get_booted_device_id(self) -> Optional[str]:
-        """Get the device ID of the currently booted simulator"""
+    async def find_or_create_device(self, preferred_name: str = "iPhone 16 Pro") -> SimulatorDevice:
+        """Find an existing device or create a new one"""
+        devices = await self.list_available_devices()
 
-        cmd = ['xcrun', 'simctl', 'list', 'devices', 'booted', '-j']
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        # First try to find preferred device
+        for device in devices:
+            if device.name == preferred_name and device.is_available:
+                self.logger.info(f"Found preferred device: {device.name} ({device.udid})")
+                return device
 
-        stdout, stderr = await process.communicate()
+        # Find any available iPhone
+        for device in devices:
+            if "iPhone" in device.name and device.is_available:
+                self.logger.info(f"Using available device: {device.name} ({device.udid})")
+                return device
 
-        if process.returncode == 0:
+        # Create new device if none available
+        return await self._create_device(preferred_name)
+
+    async def boot_device(self, device: SimulatorDevice) -> bool:
+        """Boot a simulator device with retry logic"""
+        if device.state == SimulatorState.BOOTED:
+            self.logger.info(f"Device {device.name} is already booted")
+            self._active_device = device
+            return True
+
+        for attempt in range(self._retry_attempts):
             try:
-                data = json.loads(stdout.decode())
-                devices = data.get('devices', {})
+                self.logger.info(f"Booting {device.name} (attempt {attempt + 1}/{self._retry_attempts})")
 
-                # Find booted device
-                for runtime, device_list in devices.items():
-                    for device in device_list:
-                        if device.get('state') == 'Booted':
-                            return device['udid']
-            except json.JSONDecodeError:
-                pass
+                # Shutdown if in weird state
+                if device.state not in [SimulatorState.SHUTDOWN, SimulatorState.BOOTED]:
+                    await self._run_command(["xcrun", "simctl", "shutdown", device.udid])
+                    await asyncio.sleep(2)
 
-        return None
+                # Boot the device
+                await self._run_command(
+                    ["xcrun", "simctl", "boot", device.udid],
+                    timeout=self._boot_timeout
+                )
 
-    async def _get_device_info(self, device_id: str) -> str:
-        """Get information about a specific device"""
+                # Wait for boot to complete
+                await self._wait_for_boot(device)
 
-        cmd = ['xcrun', 'simctl', 'list', 'devices', '-j']
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+                # Open Simulator app
+                await self._open_simulator_app()
 
-        stdout, stderr = await process.communicate()
+                self._active_device = device
+                self.logger.info(f"Successfully booted {device.name}")
+                return True
 
-        if process.returncode == 0:
+            except Exception as e:
+                self.logger.warning(f"Boot attempt {attempt + 1} failed: {e}")
+                if attempt < self._retry_attempts - 1:
+                    await asyncio.sleep(self._retry_delay)
+                else:
+                    raise SimulatorError(f"Failed to boot device after {self._retry_attempts} attempts: {e}")
+
+        return False
+
+    async def install_app(self, device_udid: str, app_path: str) -> bool:
+        """Install app with advanced retry and cleanup logic"""
+        if not os.path.exists(app_path):
+            raise SimulatorError(f"App not found at: {app_path}")
+
+        # Clean up any existing installation
+        app_info = await self._get_app_info(app_path)
+        bundle_id = app_info.get("CFBundleIdentifier")
+
+        if bundle_id:
+            await self._uninstall_app_if_exists(device_udid, bundle_id)
+
+        # Try installation with different strategies
+        strategies = [
+            self._install_with_xcrun,
+            self._install_with_copy_method,
+            self._install_with_temp_copy
+        ]
+
+        for strategy in strategies:
             try:
-                data = json.loads(stdout.decode())
-                devices = data.get('devices', {})
+                if await strategy(device_udid, app_path):
+                    self.logger.info(f"Successfully installed app using {strategy.__name__}")
+                    return True
+            except Exception as e:
+                self.logger.warning(f"Installation strategy {strategy.__name__} failed: {e}")
+                continue
 
-                for runtime, device_list in devices.items():
-                    for device in device_list:
-                        if device.get('udid') == device_id:
-                            return f"{device['name']} ({device_id})"
-            except json.JSONDecodeError:
-                pass
+        raise SimulatorError("All installation strategies failed")
 
-        return device_id
-
-    async def _get_available_devices(self) -> Dict[str, str]:
-        """Get available iOS simulator devices"""
-
-        cmd = ['xcrun', 'simctl', 'list', 'devices', 'available', '-j']
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        stdout, stderr = await process.communicate()
-
-        available = {}
-
-        if process.returncode == 0:
+    async def launch_app(self, device_udid: str, bundle_id: str) -> bool:
+        """Launch app with proper error handling"""
+        for attempt in range(self._retry_attempts):
             try:
-                data = json.loads(stdout.decode())
-                devices = data.get('devices', {})
+                self.logger.info(f"Launching {bundle_id} (attempt {attempt + 1})")
 
-                # Find iOS devices
-                for runtime, device_list in devices.items():
-                    if 'iOS' in runtime:
-                        for device in device_list:
-                            if device.get('isAvailable', False):
-                                available[device['name']] = device['udid']
-            except json.JSONDecodeError:
-                pass
+                # Only terminate if this is a retry attempt (app failed to launch)
+                if attempt > 0:
+                    await self._run_command(
+                        ["xcrun", "simctl", "terminate", device_udid, bundle_id],
+                        check=False
+                    )
+                    await asyncio.sleep(1)
 
-        return available
+                # Launch the app (without --console to avoid hanging)
+                result = await self._run_command(
+                    ["xcrun", "simctl", "launch", device_udid, bundle_id],
+                    timeout=10  # Much shorter timeout since we just need to trigger launch
+                )
 
-    async def _open_simulator_app(self):
-        """Open the Simulator app"""
+                if result.returncode == 0:
+                    self.logger.info(f"Successfully launched {bundle_id}")
+                    return True
+                    
+                # Even if launch command fails, check if app is running
+                await asyncio.sleep(1)
+                if await self.is_app_running(device_udid, bundle_id):
+                    self.logger.info(f"App {bundle_id} is running despite launch command issues")
+                    return True
 
-        cmd = ['open', '-a', 'Simulator']
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+            except Exception as e:
+                self.logger.warning(f"Launch attempt {attempt + 1} failed: {e}")
+                if attempt < self._retry_attempts - 1:
+                    await asyncio.sleep(self._retry_delay)
 
-        await process.communicate()
+        return False
+
+    async def install_and_launch_app(self, app_path: str, bundle_id: str, status_callback=None) -> Tuple[bool, str]:
+        """Install and launch app in simulator - matches GitHub implementation"""
+        try:
+            # Verify app bundle exists
+            if not os.path.exists(app_path) or not app_path.endswith('.app'):
+                return False, f"Invalid app bundle path: {app_path}"
+            
+            # Ensure simulator is booted
+            if status_callback:
+                await status_callback("🔄 Ensuring simulator is ready...")
+            
+            # Find or boot a device (Simulator app will be opened during boot if needed)
+            device = None
+            devices = await self.list_available_devices()
+            
+            # Look for booted iPhone device
+            booted_iphones = [d for d in devices if "iPhone" in d.name and d.state == SimulatorState.BOOTED]
+            if booted_iphones:
+                device = booted_iphones[0]
+            else:
+                # Try to boot iPhone 16
+                iphone_devices = [d for d in devices if "iPhone 16" in d.name]
+                if iphone_devices:
+                    device = iphone_devices[0]
+                    if status_callback:
+                        await status_callback(f"📱 Booting {device.name}...")
+                    await self.boot_device(device)
+                else:
+                    # Use any available device
+                    device = devices[0] if devices else None
+                    if device and device.state != SimulatorState.BOOTED:
+                        await self.boot_device(device)
+            
+            if not device:
+                return False, "No simulator device available"
+            
+            # Install the app
+            if status_callback:
+                await status_callback("📦 Installing app (this may take up to 2 minutes)...")
+            
+            self.logger.info(f"Installing app from {app_path} to device {device.udid}")
+            install_success = await self.install_app(device.udid, app_path)
+            if not install_success:
+                self.logger.error(f"Failed to install app on device {device.udid}")
+                return False, "Failed to install app"
+            
+            if status_callback:
+                await status_callback("✅ App installed successfully!")
+            
+            # Check if app is already running (iOS often auto-launches after install)
+            await asyncio.sleep(2)  # Give iOS time to auto-launch
+            
+            if await self.is_app_running(device.udid, bundle_id):
+                self.logger.info(f"App {bundle_id} is already running (auto-launched by iOS)")
+                if status_callback:
+                    await status_callback("✅ App is already running!")
+            else:
+                # Launch the app only if not running
+                if status_callback:
+                    await status_callback("🚀 Launching app...")
+                
+                launch_success = await self.launch_app(device.udid, bundle_id)
+                if not launch_success:
+                    return False, "Failed to launch app"
+            
+            return True, f"App launched successfully on {device.name}"
+            
+        except Exception as e:
+            self.logger.error(f"Error in install_and_launch_app: {e}")
+            return False, f"Error: {str(e)}"
 
     async def capture_screenshot(self, output_path: str) -> bool:
-        """Capture a screenshot from the booted simulator"""
+        """Capture screenshot from active device"""
+        if not self._active_device:
+            raise SimulatorError("No active device")
 
-        device_id = await self._get_booted_device_id()
-        if not device_id:
+        try:
+            await self._run_command([
+                "xcrun", "simctl", "io", self._active_device.udid,
+                "screenshot", output_path
+            ])
+            return os.path.exists(output_path)
+        except Exception as e:
+            self.logger.error(f"Failed to capture screenshot: {e}")
             return False
 
-        cmd = ['xcrun', 'simctl', 'io', device_id, 'screenshot', output_path]
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+    async def get_app_logs(self, bundle_id: str, lines: int = 100) -> str:
+        """Get recent app logs"""
+        if not self._active_device:
+            return ""
+
+        try:
+            # Get device logs
+            result = await self._run_command([
+                "xcrun", "simctl", "spawn", self._active_device.udid,
+                "log", "show", "--predicate", f'processIdentifier == "{bundle_id}"',
+                "--last", f"{lines}m"
+            ], check=False)
+
+            return result.stdout
+        except Exception:
+            return ""
+
+    async def is_app_running(self, device_udid: str, bundle_id: str) -> bool:
+        """Check if app is currently running on device"""
+        try:
+            result = await self._run_command(
+                ["xcrun", "simctl", "listapps", device_udid, "--json"],
+                check=False
+            )
+            if result.returncode == 0 and result.stdout:
+                import json
+                apps_data = json.loads(result.stdout)
+                for app_id, app_info in apps_data.items():
+                    if app_id == bundle_id:
+                        # Check if app has a process ID (meaning it's running)
+                        return app_info.get("ProcessID", 0) > 0
+            return False
+        except Exception as e:
+            self.logger.warning(f"Failed to check if app is running: {e}")
+            return False
+
+    # Private helper methods
+
+    async def _run_command(self, cmd: List[str], timeout: int = 30, check: bool = True) -> subprocess.CompletedProcess:
+        """Run command with timeout and logging"""
+        self.logger.debug(f"Running command: {' '.join(cmd)}")
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout
+            )
+
+            result = subprocess.CompletedProcess(
+                args=cmd,
+                returncode=process.returncode,
+                stdout=stdout.decode('utf-8') if stdout else '',
+                stderr=stderr.decode('utf-8') if stderr else ''
+            )
+
+            if check and result.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    result.returncode, cmd, result.stdout, result.stderr
+                )
+
+            return result
+
+        except asyncio.TimeoutError:
+            if process:
+                process.terminate()
+                await process.wait()
+            raise SimulatorError(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+
+    async def _wait_for_boot(self, device: SimulatorDevice, timeout: int = 60):
+        """Wait for device to fully boot"""
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            result = await self._run_command([
+                "xcrun", "simctl", "list", "devices", "--json"
+            ])
+
+            devices_data = json.loads(result.stdout)
+            for runtime_devices in devices_data.get("devices", {}).values():
+                for d in runtime_devices:
+                    if d["udid"] == device.udid and d["state"] == "Booted":
+                        # Additional check - wait for SpringBoard
+                        await self._wait_for_springboard(device.udid)
+                        return
+
+            await asyncio.sleep(1)
+
+        raise SimulatorError(f"Device failed to boot within {timeout}s")
+
+    async def _wait_for_springboard(self, device_udid: str):
+        """Wait for SpringBoard to be ready"""
+        for i in range(10):
+            # Only log on first attempt to reduce noise
+            if i == 0:
+                result = await self._run_command([
+                    "xcrun", "simctl", "spawn", device_udid,
+                    "launchctl", "print", "system"
+                ], check=False)
+            else:
+                # Suppress logging for subsequent attempts
+                cmd = ["xcrun", "simctl", "spawn", device_udid, "launchctl", "print", "system"]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                result = subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=process.returncode,
+                    stdout=stdout.decode('utf-8', errors='ignore'),
+                    stderr=stderr.decode('utf-8', errors='ignore')
+                )
+
+            if "com.apple.SpringBoard" in result.stdout:
+                return
+
+            await asyncio.sleep(1)
+
+    async def _open_simulator_app(self):
+        """Open Simulator.app and bring to foreground"""
+        try:
+            await self._run_command(["open", "-a", "Simulator"])
+            await asyncio.sleep(1)
+
+            # Bring to foreground more aggressively
+            await self._run_command([
+                "osascript", "-e",
+                'tell application "Simulator" to activate'
+            ], check=False)
+            
+            # Also try to bring the window to front
+            await self._run_command([
+                "osascript", "-e",
+                'tell application "System Events" to set frontmost of process "Simulator" to true'
+            ], check=False)
+        except Exception as e:
+            self.logger.warning(f"Failed to open Simulator app: {e}")
+
+    async def _get_app_info(self, app_path: str) -> Dict[str, str]:
+        """Extract app info from Info.plist"""
+        plist_path = os.path.join(app_path, "Info.plist")
+        if not os.path.exists(plist_path):
+            return {}
+
+        try:
+            result = await self._run_command([
+                "plutil", "-convert", "json", "-o", "-", plist_path
+            ])
+            return json.loads(result.stdout)
+        except Exception:
+            return {}
+
+    async def _uninstall_app_if_exists(self, device_udid: str, bundle_id: str):
+        """Uninstall app if it exists"""
+        try:
+            await self._run_command([
+                "xcrun", "simctl", "uninstall", device_udid, bundle_id
+            ], check=False)
+            await asyncio.sleep(1)
+        except Exception:
+            pass
+
+    async def _install_with_xcrun(self, device_udid: str, app_path: str) -> bool:
+        """Standard installation method"""
+        self.logger.info(f"Attempting standard xcrun install (timeout: {self._install_timeout}s)")
+        result = await self._run_command([
+            "xcrun", "simctl", "install", device_udid, app_path
+        ], timeout=self._install_timeout, check=False)
+
+        if result.returncode != 0:
+            self.logger.error(f"xcrun install failed: {result.stderr}")
+        else:
+            self.logger.info("xcrun install succeeded")
+            
+        return result.returncode == 0
+
+    async def _install_with_copy_method(self, device_udid: str, app_path: str) -> bool:
+        """Alternative installation using direct copy"""
+        # Get device data directory
+        device_dir = os.path.expanduser(
+            f"~/Library/Developer/CoreSimulator/Devices/{device_udid}"
         )
 
-        stdout, stderr = await process.communicate()
+        if not os.path.exists(device_dir):
+            return False
 
-        return process.returncode == 0
+        # Create app container
+        container_path = os.path.join(
+            device_dir, "data/Containers/Bundle/Application"
+        )
+        os.makedirs(container_path, exist_ok=True)
+
+        # Generate unique container ID
+        import uuid
+        container_id = str(uuid.uuid4()).upper()
+        app_container = os.path.join(container_path, container_id)
+
+        try:
+            # Copy app to container
+            shutil.copytree(app_path, os.path.join(app_container, os.path.basename(app_path)))
+
+            # Trigger installation
+            await self._run_command([
+                "xcrun", "simctl", "install", device_udid, app_path
+            ], check=False)
+
+            return True
+        except Exception:
+            # Clean up on failure
+            if os.path.exists(app_container):
+                shutil.rmtree(app_container)
+            return False
+
+    async def _install_with_temp_copy(self, device_udid: str, app_path: str) -> bool:
+        """Installation using temporary copy to avoid permission issues"""
+        temp_dir = tempfile.mkdtemp()
+        temp_app_path = os.path.join(temp_dir, os.path.basename(app_path))
+
+        try:
+            # Copy to temp location
+            shutil.copytree(app_path, temp_app_path)
+
+            # Fix permissions
+            await self._run_command([
+                "chmod", "-R", "755", temp_app_path
+            ])
+
+            # Install from temp location
+            result = await self._run_command([
+                "xcrun", "simctl", "install", device_udid, temp_app_path
+            ], timeout=self._install_timeout, check=False)
+
+            return result.returncode == 0
+
+        finally:
+            # Clean up temp directory
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+
+    async def _create_device(self, name: str) -> SimulatorDevice:
+        """Create a new simulator device"""
+        # Get available device types and runtimes
+        result = await self._run_command([
+            "xcrun", "simctl", "list", "devicetypes", "--json"
+        ])
+        devicetypes = json.loads(result.stdout)
+
+        result = await self._run_command([
+            "xcrun", "simctl", "list", "runtimes", "--json"
+        ])
+        runtimes = json.loads(result.stdout)
+
+        # Find iPhone device type
+        iphone_type = None
+        for dt in devicetypes.get("devicetypes", []):
+            if name in dt.get("name", ""):
+                iphone_type = dt["identifier"]
+                break
+
+        if not iphone_type:
+            # Fallback to any iPhone
+            for dt in devicetypes.get("devicetypes", []):
+                if "iPhone" in dt.get("name", ""):
+                    iphone_type = dt["identifier"]
+                    break
+
+        # Find latest iOS runtime
+        ios_runtime = None
+        for rt in runtimes.get("runtimes", []):
+            if "iOS" in rt.get("name", "") and rt.get("isAvailable", False):
+                ios_runtime = rt["identifier"]
+
+        if not iphone_type or not ios_runtime:
+            raise SimulatorError("No suitable device type or runtime found")
+
+        # Create device
+        result = await self._run_command([
+            "xcrun", "simctl", "create", name, iphone_type, ios_runtime
+        ])
+
+        device_udid = result.stdout.strip()
+
+        return SimulatorDevice(
+            udid=device_udid,
+            name=name,
+            state=SimulatorState.SHUTDOWN,
+            runtime=ios_runtime,
+            device_type=iphone_type
+        )
+
+    def _extract_ios_version(self, runtime: str) -> tuple:
+        """Extract iOS version for sorting"""
+        match = re.search(r'iOS[- ](\d+)\.(\d+)', runtime)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+        return (0, 0)
+
+    async def cleanup(self):
+        """Clean up resources"""
+        if self._active_device:
+            try:
+                await self._run_command([
+                    "xcrun", "simctl", "shutdown", self._active_device.udid
+                ], check=False)
+            except Exception:
+                pass
+            self._active_device = None

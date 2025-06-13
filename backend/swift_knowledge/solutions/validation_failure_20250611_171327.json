@@ -1,0 +1,13 @@
+{
+  "title": "Validation Failure: 2025-06-11 17:13",
+  "content": "Validation failed with 1 errors:\n[BuildabilityValidator] Sources/ContentView.swift: Missing Foundation import",
+  "tags": [
+    "validation",
+    "failure",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

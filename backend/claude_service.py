@@ -25,19 +25,30 @@ class ClaudeService:
         self.system_prompt = """You are SwiftGen AI, an expert iOS developer. Create production-ready SwiftUI apps.
 
 CRITICAL RULES - FOLLOW EXACTLY:
-1. Use @Environment(\.dismiss) NOT @Environment(\.presentationMode) for iOS 15+
-2. ALWAYS use double quotes " for strings, NEVER single quotes '
-3. For dismiss functionality use: dismiss() NOT presentationMode.wrappedValue.dismiss()
-4. Never use double double-quotes like "" at the start/end of strings
-5. Import SwiftUI at the top of every file
-6. Bundle IDs must not contain spaces - only lowercase letters, numbers, and dots
-7. ALWAYS return ONLY valid JSON - no explanatory text before or after the JSON
-8. CRITICAL: Use the EXACT bundle ID provided in the prompt - do NOT use generic IDs
-9. ENSURE all files have actual content - never return empty content strings
+1. TARGET iOS 16.0+ EXCLUSIVELY - Use only modern SwiftUI syntax
+2. Use @Environment(\.dismiss) NOT @Environment(\.presentationMode) for iOS 16+
+3. Use NavigationStack NOT NavigationView
+4. ALWAYS use double quotes " for strings, NEVER single quotes '
+5. For dismiss functionality use: dismiss() NOT presentationMode.wrappedValue.dismiss()
+6. Never use double double-quotes like "" at the start/end of strings
+7. Import SwiftUI at the top of every file
+8. Bundle IDs must not contain spaces - only lowercase letters, numbers, and dots
+9. ALWAYS return ONLY valid JSON - no explanatory text before or after the JSON
+10. CRITICAL: Use the EXACT bundle ID provided in the prompt - do NOT use generic IDs
+11. ENSURE all files have actual content - never return empty content strings
 
-MODERN SWIFTUI PATTERNS:
+MANDATORY NAMING RULES - NEVER VIOLATE:
+12. NEVER use 'Task' as a struct/class name (use TodoItem, UserTask, WorkItem instead)
+13. NEVER use 'State' as a struct/class name (use AppState, ViewState, FeatureState)
+14. NEVER use 'Action' as a struct/class name (use AppAction, ViewAction, FeatureAction)
+15. NEVER use Swift reserved types: Result, Error, Never, Any, AnyObject
+
+MODERN SWIFTUI PATTERNS FOR iOS 16+:
 ✅ CORRECT: @Environment(\.dismiss) private var dismiss
 ❌ WRONG: @Environment(\.presentationMode) var presentationMode
+
+✅ CORRECT: NavigationStack { }
+❌ WRONG: NavigationView { }
 
 ✅ CORRECT: Button("Back") { dismiss() }
 ❌ WRONG: Button("Back") { presentationMode.wrappedValue.dismiss() }
@@ -65,8 +76,53 @@ CRITICAL: Return ONLY the JSON object. Do NOT include any explanatory text like 
 
         return f"com.swiftgen.{safe_name}"
 
+    def _extract_actual_app_name_from_code(self, files: List[Dict]) -> str:
+        """Extract the actual app name from the Swift code structure"""
+        for file in files:
+            content = file.get("content", "")
+            if "@main" in content and "App:" in content:
+                # Look for struct XxxApp: App pattern
+                match = re.search(r'struct\s+(\w+)App\s*:\s*App', content)
+                if match:
+                    app_name = match.group(1)
+                    # Convert from PascalCase back to readable name
+                    # e.g., CoffeeCounter -> Coffee Counter
+                    readable_name = re.sub(r'([A-Z])', r' \1', app_name).strip()
+                    return readable_name
+        return "MyApp"
+
+    def _normalize_app_name_in_code(self, files: List[Dict], target_app_name: str) -> List[Dict]:
+        """Normalize all app names in code to match the target app name"""
+        safe_app_name = target_app_name.replace(" ", "")
+        
+        for file in files:
+            content = file.get("content", "")
+            original_content = content
+            
+            # Replace any XxxApp with the correct app name
+            if "@main" in content and "App:" in content:
+                # Replace struct XxxApp: App with correct name
+                content = re.sub(r'struct\s+\w+App\s*:\s*App', f'struct {safe_app_name}App: App', content)
+                print(f"[CLAUDE NAME FIX] Updated @main struct to {safe_app_name}App")
+            
+            # Update any ViewModel references to match the app name pattern
+            old_viewmodel_pattern = r'(\w+)ViewModel'
+            viewmodel_matches = re.findall(old_viewmodel_pattern, content)
+            
+            for old_prefix in set(viewmodel_matches):
+                if old_prefix and old_prefix != safe_app_name:
+                    # Replace the old ViewModel prefix with the new one
+                    content = content.replace(f'{old_prefix}ViewModel', f'{safe_app_name}ViewModel')
+                    print(f"[CLAUDE NAME FIX] Updated {old_prefix}ViewModel to {safe_app_name}ViewModel")
+            
+            # Update any class/struct names that might contain the old app name
+            if content != original_content:
+                file["content"] = content
+                
+        return files
+
     def _ensure_files_have_content(self, response: Dict) -> Dict:
-        """Ensure all files have actual content"""
+        """Ensure all files have actual content and normalize app names"""
         if "files" in response:
             for file in response["files"]:
                 if not file.get("content") or not file["content"].strip():
@@ -97,6 +153,24 @@ struct ContentView: View {
         .padding()
     }
 }"""
+
+        # CRITICAL: Normalize app names for consistency
+        if "files" in response and "app_name" in response:
+            # Get the app name and extract actual name from code if needed
+            detected_app_name = response.get("app_name", "MyApp")
+            actual_app_name = self._extract_actual_app_name_from_code(response["files"])
+            
+            # Use the detected app name as the target, and normalize code to match
+            final_app_name = detected_app_name if detected_app_name != "MyApp" else actual_app_name
+            
+            print(f"[CLAUDE NAME DETECTION] Detected: {detected_app_name}, From Code: {actual_app_name}, Final: {final_app_name}")
+            
+            # Normalize all app names in the code to match the final app name
+            response["files"] = self._normalize_app_name_in_code(response["files"], final_app_name)
+            response["app_name"] = final_app_name
+            
+            print(f"[CLAUDE SERVICE] Final app name after normalization: {final_app_name}")
+
         return response
 
     async def generate_ios_app(self, description: str, app_name: Optional[str] = None) -> Dict:
@@ -263,6 +337,12 @@ TECHNICAL REQUIREMENTS:
 - All calculations and state changes must update the UI
 - Every file must have complete, working Swift code
 
+NAMING RULES (MANDATORY):
+- NEVER use 'Task' as a struct name (use TodoItem, UserTask, WorkItem)
+- NEVER use 'State' as a struct name (use AppState, ViewState)
+- NEVER use 'Action' as a struct name (use AppAction, ViewAction)
+- Avoid all Swift reserved types in your naming
+
 IMPORTANT: Bundle ID must be exactly: {safe_bundle_id}
 DO NOT USE: com.swiftgen.myapp
 
@@ -367,6 +447,12 @@ CRITICAL SYNTAX RULES:
 - Ensure all Button actions actually perform their intended function
 - Every file must have complete, working Swift code
 
+NAMING RULES (NEVER VIOLATE):
+- NEVER use 'Task' as a struct name (use TodoItem, UserTask, WorkItem)
+- NEVER use 'State' as a struct name (use AppState, ViewState)
+- NEVER use 'Action' as a struct name (use AppAction, ViewAction)
+- Preserve all existing functionality while making changes
+
 IMPORTANT: Keep the EXACT SAME bundle ID: {safe_bundle_id}
 NO SPACES IN BUNDLE ID!
 
@@ -469,7 +555,35 @@ Return ONLY a valid JSON object (no explanatory text) with ALL files:
         # Method 1: Direct parse (if response is pure JSON)
         try:
             result = json.loads(content)
-            # CRITICAL: Validate bundle ID
+            
+            # Check if it's a file mapping format: {"Sources/App.swift": "content...", ...}
+            if isinstance(result, dict):
+                file_keys = [k for k in result.keys() if k.endswith('.swift') and '/' in k]
+                if file_keys and len(file_keys) == len(result):  # All keys are file paths
+                    print(f"[CLAUDE SERVICE] Detected file mapping format with {len(file_keys)} files")
+                    
+                    # Convert to expected format
+                    files = []
+                    for path, file_content in result.items():
+                        if path.endswith('.swift') and isinstance(file_content, str):
+                            files.append({
+                                "path": path,
+                                "content": file_content
+                            })
+                    
+                    # Create proper response structure
+                    formatted_response = {
+                        "files": files,
+                        "app_name": "MyApp",  # Will be detected from code
+                        "bundle_id": "com.swiftgen.app",  # Will be overridden
+                        "features": [],
+                        "unique_aspects": ""
+                    }
+                    
+                    print(f"[CLAUDE SERVICE] Converted file mapping to standard format: {len(files)} files")
+                    return formatted_response
+            
+            # Standard format validation
             if "bundle_id" in result and result["bundle_id"] == "com.swiftgen.myapp":
                 print("WARNING: Claude returned generic bundle ID")
             return result

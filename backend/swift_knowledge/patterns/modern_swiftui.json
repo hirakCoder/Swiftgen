@@ -1,0 +1,17 @@
+{
+  "title": "Modern SwiftUI Patterns for iOS 16+",
+  "content": "\n                    Essential iOS 16+ patterns:\n                    \n                    1. Navigation:\n                    // WRONG (deprecated)\n                    NavigationView {\n                        content\n                    }\n                    \n                    // CORRECT\n                    NavigationStack {\n                        content\n                    }\n                    \n                    2. Dismissal:\n                    // WRONG (deprecated)\n                    @Environment(\\.presentationMode) var presentationMode\n                    presentationMode.wrappedValue.dismiss()\n                    \n                    // CORRECT\n                    @Environment(\\.dismiss) private var dismiss\n                    dismiss()\n                    \n                    3. Async/Await:\n                    .task {\n                        await loadData()\n                    }\n                    \n                    4. New modifiers:\n                    .scrollDismissesKeyboard(.interactively)\n                    .textFieldStyle(.roundedBorder)\n                    .presentationDetents([.medium, .large])\n                ",
+  "tags": [
+    "swiftui",
+    "ios16",
+    "modern",
+    "navigation",
+    "dismiss"
+  ],
+  "severity": "important",
+  "solutions": [
+    "Always target iOS 16.0 minimum",
+    "Use NavigationStack for all navigation",
+    "Prefer @Environment(\\.dismiss) over presentationMode"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Validation Failure: 2025-06-10 10:45",
+  "content": "Validation failed with 2 errors:\n[DependencyValidator] Sources/ContentView.swift: Found phantom dependency: .shared.\n[BuildabilityValidator] Sources/ViewModels/CurrencyConverterViewModel.swift: Missing SwiftUI import",
+  "tags": [
+    "validation",
+    "failure",
+    "DependencyValidator",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

@@ -14,11 +14,20 @@ class SwiftGenChat {
         this.projects = [];
         this.buildLogs = [];
         this.editingFile = null;
+        
+        // Track modification count for current session
+        this.modificationCount = 0;
+        
+        // Track if generation is complete to prevent re-showing progress
+        this.generationComplete = false;
 
         this.initializeEventListeners();
         this.setupTextareaAutoResize();
         this.initializeProgress();
         this.loadProjects();
+        
+        // Set initial status
+        this.updateStatus('ready', 'Ready to create apps');
     }
 
     initializeEventListeners() {
@@ -32,6 +41,9 @@ class SwiftGenChat {
         document.getElementById('newChatBtn').addEventListener('click', () => {
             this.startNewProject();
         });
+        
+        // Don't connect WebSocket until we have a project
+        // this.connectWebSocket('new');
 
         // Enter key handling for textarea
         document.getElementById('chatInput').addEventListener('keydown', (e) => {
@@ -75,6 +87,22 @@ class SwiftGenChat {
             build: { percent: 60, text: 'Building app...', completed: false },
             install: { percent: 80, text: 'Installing to simulator...', completed: false },
             launch: { percent: 100, text: 'Launching app...', completed: false }
+        };
+
+        // Reset progress state
+        Object.keys(this.progressSteps).forEach(step => {
+            this.progressSteps[step].completed = false;
+        });
+    }
+    
+    initializeModificationProgress() {
+        // Use different progress steps for modifications
+        this.progressSteps = {
+            generate: { percent: 20, text: 'Analyzing modification...', completed: false },
+            create: { percent: 40, text: 'Updating code...', completed: false },
+            build: { percent: 60, text: 'Rebuilding app...', completed: false },
+            install: { percent: 80, text: 'Reinstalling...', completed: false },
+            launch: { percent: 100, text: 'Relaunching app...', completed: false }
         };
 
         // Reset progress state
@@ -148,7 +176,7 @@ class SwiftGenChat {
         const input = document.getElementById('chatInput');
         const message = input.value.trim();
 
-        if (!message || this.isProcessing) return;
+        if (!message) return;
 
         // Add user message to chat
         this.addMessage('user', message);
@@ -157,17 +185,45 @@ class SwiftGenChat {
         input.value = '';
         input.style.height = 'auto';
 
-        // Determine intent
-        const intent = this.analyzeIntent(message);
-
-        if (intent.type === 'create_app') {
-            await this.createNewApp(intent.appName, message);
-        } else if (intent.type === 'modify_app' && this.currentProjectId) {
-            await this.modifyExistingApp(message);
-        } else if (intent.type === 'question') {
-            this.handleQuestion(message);
+        // Debug logging
+        console.log('Chat submit:', {
+            hasWebSocket: !!this.ws,
+            wsState: this.ws?.readyState,
+            wsOpen: this.ws?.readyState === WebSocket.OPEN,
+            currentProjectId: this.currentProjectId
+        });
+        
+        // If WebSocket is connected, send through WebSocket for intelligent processing
+        if (this.ws && this.ws.readyState === WebSocket.OPEN && this.currentProjectId) {
+            console.log('Sending via WebSocket');
+            this.ws.send(JSON.stringify({
+                type: 'chat',
+                content: message
+            }));
         } else {
-            this.addMessage('assistant', "I can help you create or modify iOS apps. Try describing an app you'd like to build!");
+            console.log('Using local intent analysis');
+            // Fallback to local intent analysis
+            const intent = this.analyzeIntent(message);
+
+            if (intent.type === 'create_app' && !this.currentProjectId) {
+                // Only create new app if no project is active
+                if (!this.isProcessing) {
+                    await this.createNewApp(intent.appName, message);
+                } else {
+                    this.addMessage('assistant', "Please wait for the current operation to complete before creating a new app.");
+                }
+            } else if ((intent.type === 'modify_app' || intent.type === 'create_app') && this.currentProjectId) {
+                // Any request when a project exists should be treated as modification
+                if (!this.isProcessing) {
+                    await this.modifyExistingApp(message);
+                } else {
+                    this.addMessage('assistant', "Please wait for the current modification to complete before requesting another change.");
+                }
+            } else if (intent.type === 'question') {
+                this.handleQuestion(message);
+            } else {
+                this.addMessage('assistant', "I can help you create or modify iOS apps. Try describing an app you'd like to build!");
+            }
         }
     }
 
@@ -189,13 +245,18 @@ class SwiftGenChat {
             appName = appNameMatch[1].trim();
         }
 
-        if (hasCreateKeyword || (!this.currentProjectId && !hasModifyKeyword)) {
-            return { type: 'create_app', appName };
-        } else if (hasModifyKeyword && this.currentProjectId) {
+        // If there's an active project, ANY request should be treated as modification
+        if (this.currentProjectId) {
             return { type: 'modify_app' };
-        } else {
-            return { type: 'question' };
         }
+        
+        // If no active project, check if it's a create request
+        if (hasCreateKeyword || !hasModifyKeyword) {
+            return { type: 'create_app', appName };
+        }
+        
+        // Default to question only if no project and has modify keywords
+        return { type: 'question' };
     }
 
     async createNewApp(appName, description) {
@@ -213,16 +274,42 @@ class SwiftGenChat {
 
         // Update project name display
         document.getElementById('projectName').textContent = `Building: ${appName}`;
+        
+        // Reset generation complete flag
+        this.generationComplete = false;
+        
+        // Update status to show we're processing
+        this.updateStatus('processing', 'Starting app generation...');
 
         // Show initial assistant response
         this.addMessage('assistant', `Great! I'll create ${appName} for you. Let me generate the Swift code and build it...`, true);
 
         try {
-            // Generate project ID for WebSocket
-            const tempProjectId = `proj_${Date.now()}`;
-            this.connectWebSocket(tempProjectId);
+            // Generate project ID and connect WebSocket
+            const projectId = `proj_${Math.random().toString(36).substr(2, 8)}`;
+            this.currentProjectId = projectId;
+            this.connectWebSocket(projectId);
+            
+            // Wait for WebSocket to connect
+            await new Promise((resolve) => {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    resolve();
+                } else {
+                    const checkConnection = setInterval(() => {
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            clearInterval(checkConnection);
+                            resolve();
+                        }
+                    }, 50);
+                    // Timeout after 2 seconds
+                    setTimeout(() => {
+                        clearInterval(checkConnection);
+                        resolve();
+                    }, 2000);
+                }
+            });
 
-            // Make API request
+            // Make API request with the project ID
             const response = await fetch('/api/generate', {
                 method: 'POST',
                 headers: {
@@ -230,7 +317,8 @@ class SwiftGenChat {
                 },
                 body: JSON.stringify({
                     app_name: appName,
-                    description: description
+                    description: description,
+                    project_id: projectId
                 })
             });
 
@@ -239,16 +327,13 @@ class SwiftGenChat {
             }
 
             const result = await response.json();
-            this.currentProjectId = result.project_id;
-
-            // Display generated files
-            if (result.generated_files && result.generated_files.length > 0) {
-                this.generatedFiles = result.generated_files;
-                this.displayGeneratedCode(result.generated_files);
-            }
-
-            // Handle build results
-            if (result.status === 'success') {
+            
+            // The new endpoint returns immediately with status "started"
+            if (result.status === 'started') {
+                // Generation will happen in background, updates via WebSocket
+                console.log('Generation started, waiting for WebSocket updates...');
+            } else if (result.status === 'success') {
+                // Legacy handling for old endpoint format
                 this.updateProgress('launch', 100);
 
                 let successMessage = `✅ ${appName} has been successfully created and built!`;
@@ -263,26 +348,34 @@ class SwiftGenChat {
 
                 // Reload projects list
                 this.loadProjects();
-            } else {
-                this.addMessage('assistant', '❌ There was an error building the app. Let me check what went wrong...', false, result.build_result.errors);
-                this.buildLogs = result.build_result.errors || [];
+            } else if (result.status === 'failed') {
+                this.addMessage('assistant', '❌ There was an error building the app. Let me check what went wrong...', false, result.errors);
+                this.buildLogs = result.errors || [];
+                this.hideProgress();
             }
 
         } catch (error) {
             console.error('Error:', error);
             this.addMessage('assistant', `❌ Failed to create app: ${error.message}`);
+            this.hideProgress();
         } finally {
             this.isProcessing = false;
-            setTimeout(() => this.hideProgress(), 2000);
         }
     }
 
+
     async modifyExistingApp(request) {
         this.isProcessing = true;
-        this.showProgress();
         this.buildLogs = [];
+        
+        // Increment modification count
+        this.modificationCount++;
+        
+        // Initialize modification-specific progress
+        this.initializeModificationProgress();
+        this.showProgress();
 
-        this.addMessage('assistant', "I'll modify your app based on your request. Let me update the code and rebuild...", true);
+        this.addMessage('assistant', `📝 Processing modification #${this.modificationCount}: "${request}"\n\nUpdating your app and relaunching...`, true);
 
         try {
             const response = await fetch('/api/modify', {
@@ -303,6 +396,17 @@ class SwiftGenChat {
 
             const result = await response.json();
 
+            // Update context with modification history
+            if (!this.currentContext.modifications) {
+                this.currentContext.modifications = [];
+            }
+            this.currentContext.modifications.push({
+                request: request,
+                timestamp: new Date().toISOString(),
+                success: result.status === 'success',
+                number: this.modificationCount
+            });
+
             // Update files display
             if (result.modified_files && result.modified_files.length > 0) {
                 this.generatedFiles = result.modified_files;
@@ -312,30 +416,55 @@ class SwiftGenChat {
             if (result.status === 'success') {
                 this.updateProgress('launch', 100);
 
-                let message = `✅ I've successfully modified your app!\n\n`;
-                if (result.features_added && result.features_added.length > 0) {
-                    message += `New features added:\n${result.features_added.map(f => `• ${f}`).join('\n')}`;
+                let message = `✅ Modification #${this.modificationCount} completed!\n\n`;
+                if (result.modification_summary) {
+                    message += `What I did: ${result.modification_summary}\n\n`;
                 }
-                message += '\n\nThe app has been rebuilt and relaunched in the simulator.';
+                message += `📱 The app has been rebuilt and is now running in the simulator with your changes.\n\n`;
+                message += `You can now:\n• See the changes in the simulator\n• Request another modification\n• View the updated code`;
 
                 this.addMessage('assistant', message);
-                this.updateStatus('ready', 'App modified and running');
+                this.updateStatus('ready', `App running (${this.modificationCount} modifications applied)`);
+                
+                // Hide progress after a short delay to show completion
+                setTimeout(() => this.hideProgress(), 1000);
+            } else if (result.status === 'failed') {
+                this.hideProgress();
+                const errors = result.errors || result.build_result?.errors || [];
+                this.buildLogs = errors;
+                
+                let errorMessage = `❌ Modification #${this.modificationCount} failed.`;
+                if (result.message) {
+                    errorMessage += `\n\n${result.message}`;
+                }
+                
+                this.addMessage('assistant', errorMessage, false, errors);
+                this.updateStatus('error', 'Modification failed');
             } else {
-                this.addMessage('assistant', '❌ Failed to modify the app. Check the errors below.', false, result.build_result.errors);
-                this.buildLogs = result.build_result.errors || [];
+                // Legacy handling
+                this.addMessage('assistant', `❌ Modification #${this.modificationCount} failed. Check the errors below.`, false, result.build_result?.errors);
+                this.buildLogs = result.build_result?.errors || [];
+                this.hideProgress();
             }
 
         } catch (error) {
             console.error('Error:', error);
-            this.addMessage('assistant', `❌ Failed to modify app: ${error.message}`);
+            this.addMessage('assistant', `❌ Failed to apply modification: ${error.message}`);
+            this.hideProgress();
         } finally {
             this.isProcessing = false;
-            setTimeout(() => this.hideProgress(), 2000);
         }
     }
 
     handleQuestion(message) {
-        // Handle general questions about SwiftGen
+        // If there's an active project, treat any question as a potential modification
+        if (this.currentProjectId) {
+            // This shouldn't happen anymore due to analyzeIntent fix, but just in case
+            this.modifyExistingApp(message);
+            return;
+        }
+        
+        // Handle general questions about SwiftGen when no project is active
         const responses = {
             'help': "I can help you create iOS apps using natural language! Just describe what you want to build, and I'll generate the Swift code and launch it in the simulator.",
             'features': "I can create various types of iOS apps including:\n• Todo lists\n• Calculators\n• Weather apps\n• Timers\n• Note-taking apps\n• Chat interfaces\n\nJust describe what you want!",
@@ -433,7 +562,7 @@ class SwiftGenChat {
 
         this.ws.onopen = () => {
             console.log('WebSocket connected');
-            this.updateStatus('connected', 'Connected to server');
+            // Don't show connection status to user - they don't need to know
         };
 
         this.ws.onmessage = (event) => {
@@ -456,15 +585,101 @@ class SwiftGenChat {
         console.log('WebSocket message:', message);
 
         switch (message.type) {
+            case 'connected':
+                // Ignore connection messages - user doesn't need to see this
+                break;
             case 'status':
+                // Show progress for status updates during generation
+                if (!this.generationComplete) {
+                    this.showProgress();
+                }
                 this.handleStatusUpdate(message.message);
+                // Update status bar too
+                if (message.status === 'generating' || message.status === 'building') {
+                    this.updateStatus('processing', message.message);
+                }
                 break;
             case 'complete':
-                // Final completion is handled in main response
+                // Handle completion message
+                this.hideProgress();
+                this.isProcessing = false;
+                
+                if (message.status === 'failed') {
+                    // Handle failed completion
+                    if (message.errors && message.errors.length > 0) {
+                        this.buildLogs = message.errors;
+                        this.addMessage('assistant', 
+                            message.message || '❌ Build failed. Please check the errors below and try again.', 
+                            false, 
+                            message.errors
+                        );
+                    } else {
+                        this.addMessage('assistant', message.message || '❌ Generation failed');
+                    }
+                    this.updateStatus('error', 'Build failed');
+                } else {
+                    // Handle successful completion
+                    if (message.message) {
+                        this.addMessage('assistant', message.message);
+                    }
+                    if (message.app_name) {
+                        this.updateStatus('ready', `${message.app_name} is running`);
+                    }
+                    
+                    // Show simulator status if launched
+                    if (message.simulator_launched) {
+                        this.showSimulatorStatus(true);
+                    }
+                }
+                
+                // Re-enable input
+                const input = document.getElementById('chatInput');
+                const sendBtn = document.getElementById('sendButton') || document.querySelector('button[type="submit"]');
+                if (input) input.disabled = false;
+                if (sendBtn) sendBtn.disabled = false;
                 break;
             case 'error':
-                if (message.errors) {
+                // Handle build/generation errors
+                this.hideProgress();
+                this.isProcessing = false;
+                
+                if (message.errors && message.errors.length > 0) {
                     this.buildLogs = message.errors;
+                    this.addMessage('assistant', 
+                        message.message || '❌ The build failed with errors. Let me check what went wrong...', 
+                        false, 
+                        message.errors
+                    );
+                } else {
+                    this.addMessage('assistant', message.message || '❌ An error occurred during generation');
+                }
+                
+                // Update status
+                this.updateStatus('error', 'Build failed');
+                
+                // Re-enable input
+                const errorInput = document.getElementById('chatInput');
+                const errorSendBtn = document.getElementById('sendButton') || document.querySelector('button[type="submit"]');
+                if (errorInput) errorInput.disabled = false;
+                if (errorSendBtn) errorSendBtn.disabled = false;
+                break;
+            case 'chat_response':
+                this.addMessage('assistant', message.message);
+                break;
+            case 'trigger_modification':
+                // Automatically trigger modification based on intelligent chat analysis
+                if (message.data && message.data.project_id) {
+                    if (!this.isProcessing) {
+                        this.modifyExistingApp(message.data.modification);
+                    } else {
+                        this.addMessage('assistant', 'Please wait for the current modification to complete.');
+                    }
+                }
+                break;
+            case 'code_generated':
+                if (message.files) {
+                    this.generatedFiles = message.files;
+                    this.displayGeneratedCode(message.files);
                 }
                 break;
         }
@@ -473,54 +688,129 @@ class SwiftGenChat {
     handleStatusUpdate(statusMessage) {
         console.log('Status update:', statusMessage);
 
-        // Update progress based on status message
-        if (statusMessage.includes('Generating Swift code')) {
-            this.updateProgress('generate');
-        } else if (statusMessage.includes('Creating project structure')) {
-            this.updateProgress('create');
-        } else if (statusMessage.includes('Building app')) {
-            this.updateProgress('build');
-        } else if (statusMessage.includes('Installing')) {
-            this.updateProgress('install');
-        } else if (statusMessage.includes('Launching')) {
-            this.updateProgress('launch');
-        } else if (statusMessage.includes('Booting simulator')) {
-            this.updateProgress('install', 70);
-        } else if (statusMessage.includes('✅')) {
+        // Update progress based on status message - handle both creation and modification
+        if (statusMessage.includes('Analyzing')) {
+            this.updateProgress('generate', 10);
+        } else if (statusMessage.includes('modification request')) {
+            // Modification-specific
+            this.updateProgress('generate', 15);
+        } else if (statusMessage.includes('Updating') || statusMessage.includes('Modifying')) {
+            // Modification-specific
+            this.updateProgress('create', 40);
+        } else if (statusMessage.includes('Creating unique') || statusMessage.includes('Architecting')) {
+            this.updateProgress('generate', 15);
+        } else if (statusMessage.includes('Generated') || statusMessage.includes('Swift files')) {
+            this.updateProgress('generate', 20);
+        } else if (statusMessage.includes('Validating')) {
+            this.updateProgress('generate', 30);
+        } else if (statusMessage.includes('Applying') && statusMessage.includes('fixes')) {
+            this.updateProgress('generate', 35);
+        } else if (statusMessage.includes('Building') && statusMessage.includes('project structure')) {
+            this.updateProgress('create', 40);
+        } else if (statusMessage.includes('Generating Xcode project')) {
+            this.updateProgress('build', 50);
+        } else if (statusMessage.includes('Building app') || statusMessage.includes('Rebuilding')) {
+            this.updateProgress('build', 60);
+        } else if (statusMessage.includes('Build completed')) {
+            this.updateProgress('build', 70);
+        } else if (statusMessage.includes('Preparing to launch')) {
+            this.updateProgress('install', 80);
+        } else if (statusMessage.includes('Installing') || statusMessage.includes('Reinstalling')) {
+            this.updateProgress('install', 85);
+        } else if (statusMessage.includes('Launching') || statusMessage.includes('Relaunching')) {
+            this.updateProgress('launch', 95);
+        } else if (statusMessage.includes('App launched successfully') || statusMessage.includes('App is already running')) {
             this.updateProgress('launch', 100);
         }
 
         // Update status text
-        document.getElementById('progressText').textContent = statusMessage;
+        const progressText = document.getElementById('progressText');
+        if (progressText) {
+            progressText.textContent = statusMessage;
+        }
 
         // Add to build logs
         this.buildLogs.push(`[${new Date().toLocaleTimeString()}] ${statusMessage}`);
     }
 
     showProgress() {
-        const container = document.getElementById('progressContainer');
-        container.classList.remove('hidden');
-        this.resetProgress();
+        // Don't show progress if generation is already complete
+        if (this.generationComplete) return;
+        
+        const container = document.getElementById('statusPanel');
+        if (container) {
+            container.classList.remove('hidden');
+            this.resetProgress();
+            // Show initial progress immediately
+            this.updateProgress('generate', 5);
+            // Start timer
+            this.startTimer();
+        }
     }
 
     hideProgress() {
-        const container = document.getElementById('progressContainer');
-        container.classList.add('hidden');
+        const container = document.getElementById('statusPanel');
+        if (container) {
+            container.classList.add('hidden');
+        }
+        // Mark generation as complete
+        this.generationComplete = true;
+        // Stop timer
+        this.stopTimer();
+    }
+    
+    startTimer() {
+        this.startTime = Date.now();
+        this.timerInterval = setInterval(() => {
+            const elapsed = Date.now() - this.startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            const display = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            const timerElement = document.getElementById('timerDisplay');
+            if (timerElement) {
+                timerElement.textContent = display;
+            }
+        }, 1000);
+    }
+    
+    stopTimer() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
     }
 
     resetProgress() {
-        document.getElementById('progressBar').style.width = '0%';
-        document.getElementById('progressPercent').textContent = '0%';
-
-        // Reset all step indicators
-        document.querySelectorAll('.step').forEach(step => {
-            step.querySelector('.bg-blue-500').style.width = '0%';
+        // Reset all progress stage indicators
+        document.querySelectorAll('.progress-stage').forEach(stage => {
+            stage.classList.remove('bg-blue-600', 'bg-green-600');
+            stage.classList.add('bg-gray-800');
+            // Reset icon colors
+            const svg = stage.querySelector('svg');
+            if (svg) {
+                svg.classList.remove('text-white');
+                svg.classList.add('text-gray-600');
+            }
+            
+            // Reset stage label colors
+            const stageContainer = stage.parentElement;
+            const labelElement = stageContainer?.querySelector('p');
+            if (labelElement) {
+                labelElement.classList.remove('text-blue-400', 'text-green-400', 'font-medium');
+                labelElement.classList.add('text-gray-500');
+            }
         });
 
         // Reset progress tracking
         Object.keys(this.progressSteps).forEach(step => {
             this.progressSteps[step].completed = false;
         });
+        
+        // Reset timer
+        const timerDisplay = document.getElementById('timerDisplay');
+        if (timerDisplay) {
+            timerDisplay.textContent = '0:00';
+        }
     }
 
     updateProgress(step, overridePercent = null) {
@@ -530,28 +820,66 @@ class SwiftGenChat {
         // Mark step as completed
         stepConfig.completed = true;
 
-        const percent = overridePercent || stepConfig.percent;
+        // Map progress steps to stage IDs and labels
+        const stepToStage = {
+            'generate': { id: 'stage-design', label: 'Design' },
+            'create': { id: 'stage-implement', label: 'Implement' },
+            'build': { id: 'stage-build', label: 'Build' },
+            'install': { id: 'stage-validate', label: 'Validate' },
+            'launch': { id: 'stage-launch', label: 'Launch' }
+        };
 
-        // Update main progress bar
-        document.getElementById('progressBar').style.width = `${percent}%`;
-        document.getElementById('progressPercent').textContent = `${percent}%`;
-        document.getElementById('progressText').textContent = stepConfig.text;
-
-        // Update step indicators
-        const stepElement = document.querySelector(`[data-step="${step}"]`);
-        if (stepElement) {
-            stepElement.querySelector('.bg-blue-500').style.width = '100%';
-        }
-
-        // Also fill previous steps
-        const steps = Object.keys(this.progressSteps);
-        const currentIndex = steps.indexOf(step);
-        for (let i = 0; i <= currentIndex; i++) {
-            const prevStep = document.querySelector(`[data-step="${steps[i]}"]`);
-            if (prevStep) {
-                prevStep.querySelector('.bg-blue-500').style.width = '100%';
+        // Update the corresponding stage
+        const stageInfo = stepToStage[step];
+        if (stageInfo) {
+            const stage = document.getElementById(stageInfo.id);
+            if (stage) {
+                // Update stage appearance
+                stage.classList.remove('bg-gray-800');
+                stage.classList.add('bg-blue-600');
+                
+                // Update icon color
+                const svg = stage.querySelector('svg');
+                if (svg) {
+                    svg.classList.remove('text-gray-600');
+                    svg.classList.add('text-white');
+                }
+                
+                // Update stage label to be more visible when active
+                const stageContainer = stage.parentElement;
+                const labelElement = stageContainer?.querySelector('p');
+                if (labelElement) {
+                    labelElement.classList.remove('text-gray-500');
+                    labelElement.classList.add('text-blue-400', 'font-medium');
+                }
+                
+                // Mark previous stages as complete
+                const stages = ['stage-design', 'stage-implement', 'stage-build', 'stage-validate', 'stage-launch'];
+                const currentIndex = stages.indexOf(stageInfo.id);
+                for (let i = 0; i < currentIndex; i++) {
+                    const prevStage = document.getElementById(stages[i]);
+                    if (prevStage) {
+                        prevStage.classList.remove('bg-gray-800', 'bg-blue-600');
+                        prevStage.classList.add('bg-green-600');
+                        const prevSvg = prevStage.querySelector('svg');
+                        if (prevSvg) {
+                            prevSvg.classList.remove('text-gray-600');
+                            prevSvg.classList.add('text-white');
+                        }
+                        
+                        // Update completed stage labels
+                        const prevContainer = prevStage.parentElement;
+                        const prevLabel = prevContainer?.querySelector('p');
+                        if (prevLabel) {
+                            prevLabel.classList.remove('text-gray-500');
+                            prevLabel.classList.add('text-green-400');
+                        }
+                    }
+                }
             }
         }
+
+        // Progress is shown via stage indicators, no progress bar in this UI
     }
 
     displayGeneratedCode(files) {
@@ -619,6 +947,41 @@ class SwiftGenChat {
             this.selectFile(0);
         }
     }
+    
+    selectFile(index) {
+        const files = this.generatedFiles;
+        if (!files || index >= files.length) return;
+
+        // Update tab selection
+        document.querySelectorAll('[data-file-index]').forEach((tab, i) => {
+            if (i === index) {
+                tab.className = 'px-4 py-2 text-sm font-medium transition-all text-blue-400 border-b-2 border-blue-400';
+            } else {
+                tab.className = 'px-4 py-2 text-sm font-medium transition-all text-gray-400 hover:text-gray-200';
+            }
+        });
+
+        // Display file content
+        const file = files[index];
+        const codeContent = document.getElementById('codeContent');
+        if (codeContent) {
+            // Escape HTML and preserve formatting
+            const escapedContent = file.content
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+            
+            codeContent.innerHTML = `<pre><code class="language-swift">${escapedContent}</code></pre>`;
+            
+            // Highlight syntax if Prism is available
+            if (typeof Prism !== 'undefined') {
+                Prism.highlightElement(codeContent.querySelector('code'));
+            }
+        }
+    }
+    
     async saveFileChanges() {
         const codeContent = document.getElementById('codeContent');
         const editButton = document.querySelector('button[onclick="swiftgenChat.startEditMode()"]');
@@ -742,12 +1105,14 @@ class SwiftGenChat {
         const indicator = document.getElementById('statusIndicator');
         const text = document.getElementById('statusText');
 
+        if (!indicator || !text) return;
+
         const statusConfig = {
-            'ready': { color: 'bg-green-500', text: 'Ready' },
-            'connected': { color: 'bg-green-500', text: message },
-            'processing': { color: 'bg-yellow-500', text: message },
-            'error': { color: 'bg-red-500', text: message },
-            'disconnected': { color: 'bg-gray-500', text: message }
+            'ready': { color: 'bg-green-500', text: message || 'Ready to create apps' },
+            'connected': { color: 'bg-green-500', text: 'Ready' }, // Don't show technical details
+            'processing': { color: 'bg-yellow-500', text: message || 'Processing...' },
+            'error': { color: 'bg-red-500', text: message || 'Error occurred' },
+            'disconnected': { color: 'bg-gray-500', text: 'Reconnecting...' }
         };
 
         const config = statusConfig[type] || statusConfig.ready;
@@ -798,6 +1163,7 @@ script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 document.head.appendChild(script);
 
 // Initialize the chat interface
-document.addEventListener('DOMContentLoaded', () => {
-    window.swiftgenChat = new SwiftGenChat();
-});
+// DISABLED: Using SwiftGenApp from index.html instead
+// document.addEventListener('DOMContentLoaded', () => {
+//     window.swiftgenChat = new SwiftGenChat();
+// });

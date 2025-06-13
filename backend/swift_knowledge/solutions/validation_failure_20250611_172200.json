@@ -1,0 +1,14 @@
+{
+  "title": "Validation Failure: 2025-06-11 17:22",
+  "content": "Validation failed with 2 errors:\n[NamingConflictValidator] Sources/ContentView.swift: Reserved type conflict: Task\n[BuildabilityValidator] Sources/ContentView.swift: Missing Foundation import",
+  "tags": [
+    "validation",
+    "failure",
+    "NamingConflictValidator",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

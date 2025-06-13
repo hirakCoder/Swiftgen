@@ -5,6 +5,8 @@ from datetime import datetime
 class GenerateRequest(BaseModel):
     description: str
     app_name: Optional[str] = None
+    project_id: Optional[str] = None
+    ios_version: Optional[str] = "17.0"  # Default to iOS 17.0
 
 class BuildStatus(BaseModel):
     status: str  # 'pending', 'building', 'success', 'failed'
@@ -20,6 +22,7 @@ class BuildResult(BaseModel):
     app_path: Optional[str] = None
     simulator_launched: bool = False
     simulator_message: Optional[str] = None
+    runtime_crash: bool = False  # Add this field
 
 class ProjectStatus(BaseModel):
     project_id: str

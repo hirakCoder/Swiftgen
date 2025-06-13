@@ -1,0 +1,18 @@
+{
+  "title": "Essential SwiftUI Components",
+  "content": "\n                    Common SwiftUI components and their proper usage:\n                    \n                    1. Lists:\n                    List {\n                        ForEach(items) { item in\n                            ItemRow(item: item)\n                        }\n                        .onDelete(perform: deleteItems)\n                        .onMove(perform: moveItems)\n                    }\n                    .listStyle(.insetGrouped)\n                    \n                    2. Forms:\n                    Form {\n                        Section(\"User Info\") {\n                            TextField(\"Name\", text: $name)\n                            DatePicker(\"Birthday\", selection: $birthday, displayedComponents: .date)\n                        }\n                        \n                        Section {\n                            Toggle(\"Enable Notifications\", isOn: $notificationsEnabled)\n                        }\n                    }\n                    \n                    3. Buttons with proper styling:\n                    Button(action: performAction) {\n                        Label(\"Save\", systemImage: \"checkmark.circle.fill\")\n                    }\n                    .buttonStyle(.borderedProminent)\n                    .controlSize(.large)\n                    \n                    4. Async Image loading:\n                    AsyncImage(url: URL(string: imageURL)) { image in\n                        image\n                            .resizable()\n                            .aspectRatio(contentMode: .fit)\n                    } placeholder: {\n                        ProgressView()\n                    }\n                ",
+  "tags": [
+    "swiftui",
+    "components",
+    "List",
+    "Form",
+    "Button",
+    "AsyncImage"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Use semantic colors and SF Symbols",
+    "Apply proper styling with modifiers",
+    "Handle loading and error states"
+  ]
+}
