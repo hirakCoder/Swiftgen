@@ -774,6 +774,25 @@ Return a JSON response with the modified files and changes made."""
                 content={"error": f"Modification failed: {str(e)}"}
             )
 
+        # Check if parsing actually succeeded
+        parsing_failed = (
+            not modified_code.get("files") or 
+            len(modified_code.get("files", [])) == 0 or
+            any("Error:" in str(change) for change in modified_code.get("changes_made", []))
+        )
+
+        if parsing_failed:
+            print("[ERROR] Parsing failed - no files or error in changes")
+            await notify_clients(project_id, {
+                "type": "error",
+                "message": "❌ Failed to parse modification response. Please try rephrasing your request.",
+                "status": "error"
+            })
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Failed to parse modification response. The AI couldn't understand the request format."}
+            )
+
         # Track which LLM was used for modification
         llm_used = modified_code.get("modified_by_llm", "unknown")
 

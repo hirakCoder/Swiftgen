@@ -43,6 +43,10 @@ class RobustErrorRecoverySystem:
         # Track recovery attempts
         self.attempt_count = 0
         self.max_attempts = 3
+        
+        # Track what we've tried to avoid infinite loops
+        self.attempted_fixes = {}  # error_fingerprint -> attempt_count
+        self.ios_target_version = "16.0"
 
         # Load error patterns
         self.error_patterns = self._load_error_patterns()
@@ -65,6 +69,24 @@ class RobustErrorRecoverySystem:
 
         # Return default patterns - comprehensive list
         return {
+            "ios_version": {
+                "patterns": [
+                    "is only available in iOS 17",
+                    "is only available in macOS",
+                    "symbolEffect.*is only available",
+                    "bounce.*is only available",
+                    "@Observable.*is only available",
+                    "scrollBounceBehavior.*is only available",
+                    "contentTransition.*is only available"
+                ],
+                "fixes": [
+                    "Replace .symbolEffect() with .scaleEffect or .opacity animations",
+                    "Replace .bounce with .animation(.spring())",
+                    "Replace @Observable with ObservableObject + @Published",
+                    "Remove iOS 17+ modifiers or use iOS 16 alternatives",
+                    "Use NavigationView instead of NavigationStack for simple cases"
+                ]
+            },
             "string_literal": {
                 "patterns": [
                     "unterminated string literal",
@@ -167,17 +189,20 @@ class RobustErrorRecoverySystem:
         """Main recovery method that tries multiple strategies"""
 
         self.logger.info(f"Starting error recovery with {len(errors)} errors")
-        # Don't use persistent attempt count - each recovery call should be independent
-        # The build service already handles attempt limiting
         
-        # Reset attempt count for each recovery session
-        # This allows the recovery system to work on each build attempt
-        # self.attempt_count += 1
+        # Create error fingerprint to track what we've tried
+        error_fingerprint = self._create_error_fingerprint(errors)
         
-        # Remove the max attempts check here - let build service handle it
-        # if self.attempt_count > self.max_attempts:
-        #     self.logger.warning("Max recovery attempts reached")
-        #     return False, swift_files, []
+        # Check if we've tried fixing this exact error pattern before
+        if error_fingerprint in self.attempted_fixes:
+            if self.attempted_fixes[error_fingerprint] >= 2:
+                self.logger.warning(f"Already attempted to fix this error pattern {self.attempted_fixes[error_fingerprint]} times. Stopping to avoid infinite loop.")
+                return False, swift_files, ["Automated recovery exhausted for this error pattern"]
+        else:
+            self.attempted_fixes[error_fingerprint] = 0
+        
+        # Increment attempt count for this fingerprint
+        self.attempted_fixes[error_fingerprint] += 1
 
         # Analyze errors
         error_analysis = self._analyze_errors(errors)
@@ -207,9 +232,31 @@ class RobustErrorRecoverySystem:
         # If all strategies fail, try last resort
         return await self._last_resort_recovery(errors, swift_files, error_analysis)
 
+    def _create_error_fingerprint(self, errors: List[str]) -> str:
+        """Create a fingerprint of the error pattern to track attempts"""
+        # Extract error types and sort them to create consistent fingerprint
+        error_types = []
+        for error in errors[:5]:  # Use first 5 errors for fingerprint
+            # Extract the core error message
+            if "is only available in iOS" in error:
+                error_types.append("ios_version_error")
+            elif "unterminated string literal" in error:
+                error_types.append("string_literal_error")
+            elif "cannot find" in error and "in scope" in error:
+                error_types.append("missing_type_error")
+            elif "switch must be exhaustive" in error:
+                error_types.append("exhaustive_switch_error")
+            else:
+                # Use first 20 chars of error as type
+                error_types.append(error[:20].replace(" ", "_"))
+        
+        # Sort and join to create consistent fingerprint
+        return "|".join(sorted(set(error_types)))
+    
     def _analyze_errors(self, errors: List[str]) -> Dict[str, List[str]]:
         """Analyze errors to categorize them"""
         analysis = {
+            "ios_version_errors": [],
             "string_literal_errors": [],
             "missing_imports": [],
             "syntax_errors": [],
@@ -227,7 +274,9 @@ class RobustErrorRecoverySystem:
             for error_type, pattern_info in self.error_patterns.items():
                 for pattern in pattern_info["patterns"]:
                     if re.search(pattern, error, re.IGNORECASE):
-                        if error_type == "string_literal":
+                        if error_type == "ios_version":
+                            analysis["ios_version_errors"].append(error)
+                        elif error_type == "string_literal":
                             analysis["string_literal_errors"].append(error)
                         elif error_type == "missing_import":
                             analysis["missing_imports"].append(error)
@@ -255,6 +304,9 @@ class RobustErrorRecoverySystem:
                                       error_analysis: Dict) -> Tuple[bool, List[Dict]]:
         """Pattern-based recovery for common errors"""
 
+        # Check for iOS version errors
+        has_ios_version_error = bool(error_analysis.get("ios_version_errors"))
+        
         # Check for PersistenceController errors
         has_persistence_error = bool(error_analysis.get("persistence_controller_errors")) or \
                               any("PersistenceController" in error or "managedObjectContext" in error for error in errors)
@@ -265,7 +317,8 @@ class RobustErrorRecoverySystem:
         if not (error_analysis.get("string_literal_errors") or 
                 error_analysis.get("syntax_errors") or 
                 has_persistence_error or 
-                has_codable_error):
+                has_codable_error or
+                has_ios_version_error):
             return False, swift_files
 
         modified_files = []
@@ -274,6 +327,44 @@ class RobustErrorRecoverySystem:
         for file in swift_files:
             content = file["content"]
             original_content = content
+
+            # Fix iOS version errors by replacing iOS 17+ features
+            if has_ios_version_error:
+                # Replace symbolEffect with spring animation
+                content = re.sub(
+                    r'\.symbolEffect\([^)]*\)',
+                    '.scaleEffect(1.1).animation(.spring(), value: true)',
+                    content
+                )
+                
+                # Replace bounce effects
+                content = re.sub(
+                    r'\.bounce',
+                    '.spring()',
+                    content
+                )
+                
+                # Replace @Observable with ObservableObject
+                content = re.sub(
+                    r'@Observable\s+class\s+',
+                    'class ',
+                    content
+                )
+                
+                # Ensure ObservableObject conformance
+                content = re.sub(
+                    r'(class\s+\w+)(?!.*:.*ObservableObject)',
+                    r'\1: ObservableObject',
+                    content
+                )
+                
+                # Replace NavigationStack with NavigationView if simple
+                if content.count('NavigationStack') == 1 and 'navigationDestination' not in content:
+                    content = content.replace('NavigationStack', 'NavigationView')
+                
+                if content != original_content:
+                    changes_made = True
+                    self.logger.info(f"Fixed iOS version compatibility issues in {file['path']}")
 
             # Fix PersistenceController errors by removing Core Data references
             if has_persistence_error:
@@ -652,7 +743,15 @@ FILES WITH ERRORS:
 {files_text}
 
 CRITICAL INSTRUCTIONS:
-1. For "cannot find type in scope" errors:
+1. For iOS version compatibility errors (HIGHEST PRIORITY):
+   - Target iOS: 16.0 - DO NOT use iOS 17+ features
+   - Replace .symbolEffect() with .scaleEffect or .opacity animations
+   - Replace .bounce with .animation(.spring())
+   - Replace @Observable with ObservableObject + @Published
+   - Use NavigationView instead of NavigationStack for simple navigation
+   - Remove any iOS 17+ specific modifiers
+
+2. For "cannot find type in scope" errors:
    - If it's 'PersistenceController', 'DataController', or similar:
      * These are Core Data controllers - either implement them or remove Core Data references
      * For simple apps, you can remove these and use @State/@StateObject instead
@@ -661,35 +760,36 @@ CRITICAL INSTRUCTIONS:
      * Or remove references if not needed
    - Ensure all referenced types have complete implementations
 
-2. For "switch must be exhaustive" errors:
+3. For "switch must be exhaustive" errors:
    - Add ALL missing cases to the switch statement
    - Or add a default case: default: break
    - Check the enum definition for all cases
 
-3. For string literal errors:
+4. For string literal errors:
    - Use regular double quotes " not fancy quotes " " or ' '
    - Fix: Text("Hello") not Text("Hello") or Text('Hello')
    - Ensure all strings are properly terminated
 
-4. For import errors:
+5. For import errors:
    - Add missing imports at the top of files
    - SwiftUI apps need: import SwiftUI
    - Core Data apps need: import CoreData
 
-5. For Codable/Encodable/Decodable errors:
+6. For Codable/Encodable/Decodable errors:
    - Add ": Codable" to struct/class declarations that need JSON encoding
    - Import Foundation if not already imported
    - Example: struct TodoItem: Identifiable, Codable { ... }
 
-6. For '@StateObject' requires property wrapper errors:
+7. For '@StateObject' requires property wrapper errors:
    - Ensure the class conforms to ObservableObject
    - Use @Published for properties that should trigger UI updates
 
-7. For missing initializer errors:
+8. For missing initializer errors:
    - Add required init methods
    - Or provide default values for all properties
 
-8. IMPORTANT: 
+9. IMPORTANT: 
+   - Target iOS 16.0 - avoid ALL iOS 17+ features
    - Fix the ROOT CAUSE, not just symptoms
    - If Core Data is causing issues and not essential, remove it
    - Keep the app functional even if simplified

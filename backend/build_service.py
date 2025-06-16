@@ -14,11 +14,13 @@ try:
     from robust_error_recovery_system import RobustErrorRecoverySystem
     from claude_service import ClaudeService
     from enhanced_claude_service import EnhancedClaudeService
+    from user_friendly_errors import UserFriendlyErrorHandler
 except ImportError as e:
     print(f"Warning: Could not import recovery systems: {e}")
     RobustErrorRecoverySystem = None
     ClaudeService = None
     EnhancedClaudeService = None
+    UserFriendlyErrorHandler = None
 
 # Import simulator service
 try:
@@ -95,6 +97,7 @@ class BuildService:
         # Initialize error recovery system
         self.error_recovery_system = None
         self.claude_service = None
+        self.user_friendly_handler = UserFriendlyErrorHandler() if UserFriendlyErrorHandler else None
 
         try:
             if RobustErrorRecoverySystem:
@@ -332,7 +335,13 @@ class BuildService:
                         # Parse unique errors
                         unique_errors = self._extract_unique_errors(current_errors)
                         print(f"[BUILD] Found {len(unique_errors)} unique errors for recovery")
-                        await self._update_status(f"🔧 Found {len(unique_errors)} errors. Attempting automatic recovery...")
+                        
+                        # Use user-friendly error messages
+                        if self.user_friendly_handler:
+                            friendly_message = self.user_friendly_handler.format_for_websocket(unique_errors)
+                            await self._update_status(friendly_message)
+                        else:
+                            await self._update_status(f"🔧 Found {len(unique_errors)} errors. Attempting automatic recovery...")
 
                         # FIXED: Use correct parameter name 'swift_files'
                         success, fixed_files, fixes = await self.error_recovery_system.recover_from_errors(

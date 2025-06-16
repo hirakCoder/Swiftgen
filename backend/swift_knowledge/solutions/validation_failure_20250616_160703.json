@@ -1,0 +1,13 @@
+{
+  "title": "Validation Failure: 2025-06-16 16:07",
+  "content": "Validation failed with 1 errors:\n[BuildabilityValidator] Sources/Views/ContentView.swift: Unbalanced braces (19 open, 18 close)",
+  "tags": [
+    "validation",
+    "failure",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

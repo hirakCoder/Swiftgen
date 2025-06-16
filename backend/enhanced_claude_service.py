@@ -311,7 +311,18 @@ IMPORTANT RULES:
 2. Keep all existing functionality unless explicitly asked to change it
 3. Maintain the same app structure and architecture
 4. Return ALL files with their complete content (modified or unchanged)
-5. Do NOT change the app name or bundle ID"""
+5. Do NOT change the app name or bundle ID
+
+CRITICAL iOS VERSION CONSTRAINTS:
+- Target iOS: 16.0
+- DO NOT use features only available in iOS 17.0 or newer:
+  * NO .symbolEffect() - use .scaleEffect or .opacity animations instead
+  * NO .bounce effects - use .animation(.spring()) instead
+  * NO @Observable macro - use ObservableObject + @Published
+  * NO .scrollBounceBehavior modifier
+  * NO .contentTransition modifier
+  * Use NavigationView instead of NavigationStack if issues arise
+- If unsure about iOS availability, use iOS 16-compatible alternatives"""
 
         user_prompt = f"""Current iOS App: {app_name}
 Original Description: {description}
@@ -392,11 +403,11 @@ CRITICAL JSON FORMATTING RULES:
                             result = json.loads(json_match.group(0))
                         except Exception as e3:
                             print(f"[ERROR] Third JSON parse failed: {e3}")
-                            # If all parsing fails, create a minimal response
+                            # If all parsing fails, return empty files to signal failure
                             return {
                                 "app_name": app_name,
                                 "bundle_id": existing_bundle_id,
-                                "files": files,  # Return original files
+                                "files": [],  # Empty files = clear failure signal
                                 "modification_summary": "Failed to parse modification response",
                                 "changes_made": ["Error: Could not parse LLM response"],
                                 "modified_by_llm": self.current_model.provider if self.current_model else "claude"
@@ -406,7 +417,7 @@ CRITICAL JSON FORMATTING RULES:
                         return {
                             "app_name": app_name,
                             "bundle_id": existing_bundle_id,
-                            "files": files,
+                            "files": [],  # Empty files = clear failure signal
                             "modification_summary": "Failed to parse modification response",
                             "changes_made": ["Error: No valid JSON in response"],
                             "modified_by_llm": self.current_model.provider if self.current_model else "claude"
@@ -423,7 +434,7 @@ CRITICAL JSON FORMATTING RULES:
             return {
                 "app_name": app_name,
                 "bundle_id": existing_bundle_id,
-                "files": files,
+                "files": [],  # Empty files = clear failure signal
                 "modification_summary": "Failed to process modification",
                 "changes_made": ["Error: Invalid response format"],
                 "modified_by_llm": self.current_model.provider if self.current_model else "claude"
