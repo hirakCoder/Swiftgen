@@ -11,6 +11,14 @@ import openai
 import requests
 from dotenv import load_dotenv
 
+# Import intelligent router
+try:
+    from intelligent_llm_router import IntelligentLLMRouter, RequestType
+except ImportError:
+    IntelligentLLMRouter = None
+    RequestType = None
+    logger.warning("IntelligentLLMRouter not available - using fallback mode")
+
 # Load environment variables
 load_dotenv()
 
@@ -38,6 +46,11 @@ class EnhancedClaudeService:
         self.available_models = []
         self.current_model = None
         self.api_keys = {}
+        self._clients = {}
+        
+        # Initialize intelligent router
+        self.router = IntelligentLLMRouter() if IntelligentLLMRouter else None
+        self.failure_count = {}  # Track failures per request
 
         # Define ALL supported models - UPDATED WITH CORRECT MODEL NAMES
         self.supported_models = [
@@ -124,8 +137,22 @@ class EnhancedClaudeService:
 
     async def generate_ios_app(self, description: str, app_name: str = None) -> Dict[str, Any]:
         """Generate iOS app code using the best available LLM"""
-        if not self.current_model:
+        if not self.available_models:
             raise Exception("No LLM model available")
+        
+        # Use intelligent routing if available
+        if self.router:
+            selected_provider = self.router.route_initial_request(description, app_type="ios")
+            if selected_provider in self.models:
+                self.current_model = self.models[selected_provider]
+                logger.info(f"[ROUTER] Selected {self.current_model.name} for app generation")
+            else:
+                logger.warning(f"[ROUTER] Provider {selected_provider} not available, using default")
+                self.current_model = self.available_models[0]
+        else:
+            # Fallback to first available model
+            if not self.current_model:
+                self.current_model = self.available_models[0]
 
         # Create the prompt for iOS app generation
         # Try to use enhanced prompts for better syntax
@@ -202,8 +229,37 @@ Return a JSON response with this EXACT structure:
 
         except Exception as e:
             logger.error(f"Generation failed with {self.current_model.name}: {str(e)}")
-
-            # Try with next available model
+            
+            # Track failure
+            request_id = f"gen_{app_name}_{description[:20]}"
+            self.failure_count[request_id] = self.failure_count.get(request_id, 0) + 1
+            
+            # Use intelligent fallback if router available
+            if self.router and self.current_model:
+                request_type = self.router.analyze_request(description)
+                next_provider, strategy = self.router.get_fallback_strategy(
+                    self.current_model.provider,
+                    request_type,
+                    self.failure_count[request_id]
+                )
+                
+                if next_provider in self.models:
+                    self.current_model = self.models[next_provider]
+                    logger.info(f"[ROUTER] Retrying with {self.current_model.name} using {strategy}")
+                    
+                    # Record failure for learning
+                    self.router.record_result(
+                        self.current_model.provider,
+                        request_type,
+                        success=False
+                    )
+                    
+                    try:
+                        return await self.generate_ios_app(description, app_name)
+                    except:
+                        pass
+            
+            # Fallback to sequential retry
             for model in self.available_models:
                 if model != self.current_model:
                     self.current_model = model
@@ -301,6 +357,26 @@ Return a JSON response with this EXACT structure:
         except:
             mod_handler = None
         
+        # Use intelligent routing for modifications
+        if self.router:
+            # Analyze modification to determine best LLM
+            selected_provider = self.router.route_initial_request(modification)
+            if selected_provider in self.models:
+                self.current_model = self.models[selected_provider]
+                logger.info(f"[ROUTER] Selected {self.current_model.name} for modification: {modification[:50]}...")
+            
+            # Create specialized prompt if router available
+            strategy = "standard approach"
+            if self.router:
+                request_type = self.router.analyze_request(modification)
+                specialized_prompt = self.router.create_specialized_prompt(
+                    self.current_model.provider,
+                    strategy,
+                    modification,
+                    []  # No previous failures yet
+                )
+                logger.info(f"[ROUTER] Using specialized prompt for {request_type.value}")
+        
         # Analyze modification request
         modification_type = self._analyze_modification_type(modification)
         
@@ -367,7 +443,49 @@ Return JSON with ALL {len(files)} files:
     "files_modified": ["List of files that were actually modified"]
 }}"""
 
-        result = await self._generate_with_current_model(system_prompt, user_prompt)
+        # Try generation with intelligent error handling
+        request_id = f"mod_{app_name}_{modification[:20]}"
+        self.failure_count[request_id] = self.failure_count.get(request_id, 0)
+        
+        try:
+            result = await self._generate_with_current_model(system_prompt, user_prompt)
+        except Exception as gen_error:
+            logger.error(f"[ROUTER] Modification generation failed: {gen_error}")
+            
+            # Intelligent fallback for modifications
+            if self.router and self.current_model:
+                self.failure_count[request_id] += 1
+                request_type = self.router.analyze_request(modification)
+                
+                # Get fallback strategy
+                next_provider, strategy = self.router.get_fallback_strategy(
+                    self.current_model.provider,
+                    request_type,
+                    self.failure_count[request_id]
+                )
+                
+                if next_provider in self.models:
+                    logger.info(f"[ROUTER] Falling back to {next_provider} with {strategy}")
+                    self.current_model = self.models[next_provider]
+                    
+                    # Create specialized prompt for fallback
+                    if self.router:
+                        specialized_user_prompt = self.router.create_specialized_prompt(
+                            next_provider,
+                            strategy,
+                            modification,
+                            [str(gen_error)]
+                        )
+                        # Append existing context
+                        specialized_user_prompt += "\n\n" + user_prompt.split("Current files:")[1] if "Current files:" in user_prompt else user_prompt
+                        user_prompt = specialized_user_prompt
+                    
+                    # Retry with fallback
+                    result = await self._generate_with_current_model(system_prompt, user_prompt)
+                else:
+                    raise gen_error
+            else:
+                raise gen_error
 
         if isinstance(result, str):
             result = result.strip()
@@ -423,6 +541,16 @@ Return JSON with ALL {len(files)} files:
                             "modified_by_llm": self.current_model.provider if self.current_model else "claude"
                         }
 
+        # Record success if using router
+        if self.router and isinstance(result, dict):
+            request_type = self.router.analyze_request(modification)
+            self.router.record_result(
+                self.current_model.provider,
+                request_type,
+                success=True
+            )
+            logger.info(f"[ROUTER] Recorded success for {self.current_model.provider} on {request_type.value}")
+        
         # Ensure consistency
         if isinstance(result, dict):
             # Validate the modification response

@@ -140,8 +140,11 @@ def main():
         print("Note: This is expected in CI/CD without full environment")
         return 0  # Don't fail CI/CD
     
-    # Test modules to run
+    # Test modules to run (ordered by dependency requirements)
     test_modules = [
+        "test_simple_integration",      # No external deps
+        "test_basic_functionality",     # Minimal deps
+        "test_intelligent_routing",     # No external deps
         "test_comprehensive_validation",
         "test_error_recovery",
         "test_rag_integration"
