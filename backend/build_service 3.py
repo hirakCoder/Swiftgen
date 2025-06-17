@@ -14,13 +14,11 @@ try:
     from robust_error_recovery_system import RobustErrorRecoverySystem
     from claude_service import ClaudeService
     from enhanced_claude_service import EnhancedClaudeService
-    from user_friendly_errors import UserFriendlyErrorHandler
 except ImportError as e:
     print(f"Warning: Could not import recovery systems: {e}")
     RobustErrorRecoverySystem = None
     ClaudeService = None
     EnhancedClaudeService = None
-    UserFriendlyErrorHandler = None
 
 # Import simulator service
 try:
@@ -29,13 +27,6 @@ except ImportError:
     print("Warning: SimulatorService not available")
     SimulatorService = None
     SimulatorState = None
-
-# Import modern pattern validator
-try:
-    from modern_pattern_validator import ModernPatternValidator
-except ImportError:
-    print("Warning: ModernPatternValidator not available")
-    ModernPatternValidator = None
 
 
 def fix_naming_consistency_in_project_yml(project_path: str):
@@ -101,13 +92,9 @@ class BuildService:
         # Initialize simulator service if available
         self.simulator_service = SimulatorService() if SimulatorService else None
 
-        # Initialize modern pattern validator
-        self.pattern_validator = ModernPatternValidator(target_ios_version="16.0") if ModernPatternValidator else None
-
         # Initialize error recovery system
         self.error_recovery_system = None
         self.claude_service = None
-        self.user_friendly_handler = UserFriendlyErrorHandler() if UserFriendlyErrorHandler else None
 
         try:
             if RobustErrorRecoverySystem:
@@ -175,19 +162,16 @@ class BuildService:
                 log_path=log_path
             )
 
-        # Get Swift files recursively from all subdirectories
+        # Get Swift files
         swift_files = []
-        for root, dirs, files in os.walk(sources_dir):
-            for filename in files:
-                if filename.endswith('.swift'):
-                    file_path = os.path.join(root, filename)
-                    # Calculate relative path from project root
-                    relative_path = os.path.relpath(file_path, project_path)
-                    with open(file_path, 'r') as f:
-                        swift_files.append({
-                            "path": relative_path,
-                            "content": f.read()
-                        })
+        for filename in os.listdir(sources_dir):
+            if filename.endswith('.swift'):
+                file_path = os.path.join(sources_dir, filename)
+                with open(file_path, 'r') as f:
+                    swift_files.append({
+                        "path": f"Sources/{filename}",
+                        "content": f.read()
+                    })
 
         await self._update_status(f"Found {len(swift_files)} Swift files in project")
 
@@ -220,51 +204,6 @@ class BuildService:
         if syntax_errors:
             errors.extend(syntax_errors)
             warnings.append(f"Found {len(syntax_errors)} syntax errors")
-
-        # Validate modern Swift patterns
-        if self.pattern_validator:
-            await self._update_status("🔍 Validating modern Swift patterns...")
-            pattern_issues = self.pattern_validator.validate_files(swift_files)
-            
-            if pattern_issues:
-                # Get critical issues that would prevent build
-                critical_issues = self.pattern_validator.get_critical_issues(pattern_issues)
-                warning_issues = self.pattern_validator.get_warnings(pattern_issues)
-                
-                # Log issues for debugging
-                print(f"[VALIDATOR] Found {len(critical_issues)} critical issues, {len(warning_issues)} warnings")
-                
-                # Format for display
-                validation_summary = self.pattern_validator.format_issues_for_display(pattern_issues)
-                await self._update_status(validation_summary)
-                
-                # Try auto-fix if we have critical issues
-                if critical_issues:
-                    await self._update_status("🔧 Attempting to auto-fix critical issues...")
-                    fixed, fixed_files, fixes = self.pattern_validator.auto_fix_issues(swift_files, pattern_issues)
-                    
-                    if fixed and fixed_files:
-                        # Write fixed files back
-                        for file in fixed_files:
-                            file_path = os.path.join(project_path, file["path"])
-                            file_dir = os.path.dirname(file_path)
-                            os.makedirs(file_dir, exist_ok=True)
-                            
-                            with open(file_path, 'w') as f:
-                                f.write(file["content"])
-                        
-                        # Update swift_files for build
-                        swift_files = fixed_files
-                        await self._update_status(f"✅ Applied {len(fixes)} pattern fixes")
-                        warnings.append(f"Auto-fixed {len(fixes)} pattern issues")
-                    else:
-                        # Add critical issues as errors
-                        for issue in critical_issues[:5]:  # Limit to first 5
-                            errors.append(f"{issue.file_path}:{issue.line_number} - {issue.message}")
-                
-                # Add warnings for non-critical issues
-                for issue in warning_issues[:3]:  # Limit to first 3
-                    warnings.append(f"{issue.file_path}:{issue.line_number} - {issue.message}")
 
         # Fix naming consistency
         fix_naming_consistency_in_project_yml(project_path)
@@ -390,13 +329,7 @@ class BuildService:
                         # Parse unique errors
                         unique_errors = self._extract_unique_errors(current_errors)
                         print(f"[BUILD] Found {len(unique_errors)} unique errors for recovery")
-                        
-                        # Use user-friendly error messages
-                        if self.user_friendly_handler:
-                            friendly_message = self.user_friendly_handler.format_for_websocket(unique_errors)
-                            await self._update_status(friendly_message)
-                        else:
-                            await self._update_status(f"🔧 Found {len(unique_errors)} errors. Attempting automatic recovery...")
+                        await self._update_status(f"🔧 Found {len(unique_errors)} errors. Attempting automatic recovery...")
 
                         # FIXED: Use correct parameter name 'swift_files'
                         success, fixed_files, fixes = await self.error_recovery_system.recover_from_errors(
@@ -408,19 +341,14 @@ class BuildService:
                         if success and fixed_files:
                             print(f"[BUILD] Recovery succeeded with {len(fixed_files)} fixed files")
                             await self._update_status(f"📝 Writing {len(fixed_files)} fixed files...")
-                            # Write fixed files back preserving directory structure
+                            # Write fixed files back
                             for file in fixed_files:
                                 if not isinstance(file, dict) or "path" not in file or "content" not in file:
                                     print(f"[BUILD] Skipping invalid file: {type(file)}")
                                     continue  # Skip invalid files silently
                                 
-                                # Use the full relative path to preserve directory structure
-                                file_path = os.path.join(project_path, file["path"])
-                                
-                                # Create directory if it doesn't exist
-                                file_dir = os.path.dirname(file_path)
-                                os.makedirs(file_dir, exist_ok=True)
-                                
+                                file_name = os.path.basename(file["path"])
+                                file_path = os.path.join(sources_dir, file_name)
                                 print(f"[BUILD] Writing fixed file: {file_path}")
                                 with open(file_path, 'w') as f:
                                     f.write(file["content"])
@@ -486,16 +414,6 @@ class BuildService:
 
             if content.count('[') != content.count(']'):
                 errors.append(f"{path}: Mismatched square brackets")
-            
-            # CRITICAL: Check for invalid module imports
-            invalid_imports = re.findall(r'import\s+(Components|Views|Models|ViewModels|Services|Utilities|Helpers|Extensions)\b', content)
-            if invalid_imports:
-                errors.append(f"{path}: Invalid local module imports detected: {', '.join(invalid_imports)}. SwiftUI doesn't use module imports for local files.")
-            
-            # Check for module prefixes (e.g., Components.MyView)
-            module_prefixes = re.findall(r'(Components|Views|Models|ViewModels|Services|Utilities|Helpers|Extensions)\.(\w+)', content)
-            if module_prefixes:
-                errors.append(f"{path}: Invalid module prefixes detected. Use direct type references instead (e.g., MyView not Components.MyView)")
 
         return errors
 

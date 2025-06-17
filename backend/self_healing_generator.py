@@ -306,6 +306,13 @@ class SelfHealingGenerator:
             "self_healed": True
         }
 
+        # First pass: Apply reserved type fixes to ALL files if any reserved type error exists
+        has_reserved_type_error = any(error.get("type") == "reserved_type" for error in validation_result["errors"])
+        if has_reserved_type_error:
+            print("[SELF-HEALING] Fixing reserved type conflicts in all files")
+            for file in healed_result["files"]:
+                self._fix_reserved_types(file)
+
         # Apply fixes for each error
         for error in validation_result["errors"]:
             error_type = error.get("type", "")
@@ -314,7 +321,7 @@ class SelfHealingGenerator:
             # Find the file to fix
             for file in healed_result["files"]:
                 if file.get("path", "") == file_path or error_type in ["missing_main", "no_files"]:
-                    if error_type in self.known_failure_patterns:
+                    if error_type in self.known_failure_patterns and error_type != "reserved_type":  # Skip reserved_type as we already fixed it
                         fix_function = self.known_failure_patterns[error_type]["fix"]
                         # Apply fix to specific file
                         fix_function(file)
@@ -356,10 +363,17 @@ class SelfHealingGenerator:
     def _fix_reserved_types(self, file: Dict) -> None:
         """Fix reserved type conflicts in a specific file"""
         content = file.get("content", "")
+        path = file.get("path", "")
+        
+        # Log what we're fixing
+        if "Task" in content and not "Task<" in content:
+            print(f"[SELF-HEALING] Fixing reserved type 'Task' in {path}")
 
+        # First, fix type definitions
         replacements = {
             "struct Task": "struct TodoItem",
             "class Task": "class TodoItem",
+            "enum Task": "enum TodoItem",
             "struct State": "struct AppState",
             "class State": "class AppState",
             "struct Action": "struct AppAction",
@@ -367,14 +381,37 @@ class SelfHealingGenerator:
         }
 
         for old, new in replacements.items():
-            content = content.replace(old, new)
+            if old in content:
+                content = content.replace(old, new)
+                print(f"[SELF-HEALING] Replaced '{old}' with '{new}'")
 
-        # Also fix type references
-        content = re.sub(r'\b:\s*Task\b', ': TodoItem', content)
-        content = re.sub(r'\b:\s*State\b', ': AppState', content)
-        content = re.sub(r'\b:\s*Action\b', ': AppAction', content)
-        content = re.sub(r'\[Task\]', '[TodoItem]', content)
+        # Fix all Task references (more comprehensive)
+        # Type annotations
+        content = re.sub(r'\bTask\s*:', 'TodoItem:', content)
+        content = re.sub(r':\s*Task\b', ': TodoItem', content)
+        content = re.sub(r':\s*\[Task\]', ': [TodoItem]', content)
         content = re.sub(r'<Task>', '<TodoItem>', content)
+        
+        # Array/Collection references
+        content = re.sub(r'\[Task\]', '[TodoItem]', content)
+        content = re.sub(r'Array<Task>', 'Array<TodoItem>', content)
+        
+        # Property declarations
+        content = re.sub(r'\blet\s+\w+:\s*Task\b', lambda m: m.group(0).replace('Task', 'TodoItem'), content)
+        content = re.sub(r'\bvar\s+\w+:\s*Task\b', lambda m: m.group(0).replace('Task', 'TodoItem'), content)
+        
+        # Function parameters and returns
+        content = re.sub(r'\(\s*task:\s*Task\s*\)', '(task: TodoItem)', content)
+        content = re.sub(r'->\s*Task\b', '-> TodoItem', content)
+        content = re.sub(r'->\s*\[Task\]', '-> [TodoItem]', content)
+        
+        # ForEach and other SwiftUI constructs
+        content = re.sub(r'ForEach\(.*?,\s*id:\s*\\\..*?\)\s*{\s*task\s+in', 
+                        lambda m: m.group(0).replace('task in', 'todoItem in'), content)
+        
+        # Variable names (be careful not to break things)
+        content = re.sub(r'\btask\b(?=\s*:)', 'todoItem', content)  # task: before type
+        content = re.sub(r'\btasks\b(?=\s*:)', 'todoItems', content)  # tasks: before type
 
         file["content"] = content
 

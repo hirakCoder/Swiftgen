@@ -12,7 +12,16 @@ CRITICAL iOS VERSION CONSTRAINT:
   * NO @Observable macro (use ObservableObject + @Published)
   * NO .scrollBounceBehavior modifier
   * NO .contentTransition modifier
-  * Use NavigationView for simple navigation (NavigationStack if complex)
+  * Use NavigationStack for navigation (NOT NavigationView which is deprecated)
+
+MODERN SWIFT PATTERNS (MANDATORY):
+1. Navigation: ALWAYS use NavigationStack, NEVER NavigationView
+2. State Management: Use ObservableObject + @Published for iOS 16
+3. Async/Await: ALWAYS use async/await, NEVER completion handlers
+4. UI Updates: ALWAYS mark UI-updating classes/methods with @MainActor
+5. Modifiers: Use .foregroundStyle NOT .foregroundColor (deprecated)
+6. Concurrency: NEVER use DispatchSemaphore with async/await
+7. Threading: Use @MainActor or MainActor.run, NOT DispatchQueue.main
 
 CRITICAL SYNTAX RULES - MUST FOLLOW:
 1. ALWAYS import SwiftUI in every Swift file
@@ -30,10 +39,21 @@ CRITICAL SYNTAX RULES - MUST FOLLOW:
 13. NEVER create incomplete type definitions like "class Calculator..."
 14. ALWAYS complete all method implementations
 15. Use proper Swift 5+ syntax - no deprecated patterns
-16. RESERVED TYPES - NEVER define these as your own types: Task, State, Action, Result, Error, Never
-    - These are Swift/SwiftUI system types that will cause conflicts
-    - Always prefix with your app's context (e.g., AppTask, GameState, UserAction)
-    - The compiler will fail if you redefine system types
+16. RESERVED TYPES - CRITICAL - NEVER define these as your own types:
+    a) Generic Types: Task, Result, Publisher, AsyncSequence, AsyncStream
+       - These require generic parameters like Task<Success, Failure>
+       - Use: TodoItem, AppResult, AppPublisher instead
+    b) Foundation Types: Data, URL, Date, UUID, Timer, Bundle, Notification
+       - These are Foundation framework types
+       - Use: AppData, LinkURL, EventDate, Identifier, AppTimer instead
+    c) SwiftUI Types: View, Text, Image, Button, Color, Font, Animation
+       - These are SwiftUI framework types
+       - Use: Screen/CustomView, Label, Photo, AppButton, Theme instead
+    d) Swift Types: Error, State, Action, Never, Void, Any, AnyObject
+       - These are Swift language types
+       - Use: AppError, AppState, UserAction instead
+    e) SPECIFICALLY for TODO apps: Use "TodoItem" NOT "Task" for your task model
+    f) The compiler will fail with "reference to generic type requires arguments" errors
 16a. AVOID CORE DATA - For simplicity and reliability:
     - Do NOT use Core Data, NSManagedObject, @FetchRequest, or PersistenceController
     - Use simple in-memory storage with @State or @StateObject
@@ -50,6 +70,65 @@ CRITICAL SYNTAX RULES - MUST FOLLOW:
     - Every View you reference MUST have a complete implementation
     - Every Model type used MUST be fully defined
     - Never reference undefined components or properties
+20. MODULE IMPORT RULES - CRITICAL FOR SWIFTUI:
+    - NEVER import local folders: NO import Components, Views, Models, ViewModels, Services
+    - ONLY import system frameworks: import SwiftUI, Foundation, Combine, CoreData, etc.
+    - SwiftUI uses direct type references, NOT module imports
+    - Access types directly: ContentView NOT Components.ContentView
+    - WRONG: import Components; Components.MyView()
+    - RIGHT: MyView() // direct reference
+
+21. onChange MODIFIER - iOS VERSION SPECIFIC:
+    - iOS 16: .onChange(of: value) { newValue in ... }
+    - iOS 17+: .onChange(of: value) { oldValue, newValue in ... } 
+    - For iOS 16 target, use the single parameter version
+    - NEVER use the iOS 17+ two-parameter version for iOS 16 apps
+
+MODERN PATTERN EXAMPLES:
+// ✅ CORRECT - NavigationStack
+NavigationStack {
+    List(items) { item in
+        NavigationLink(value: item) {
+            Text(item.name)
+        }
+    }
+    .navigationDestination(for: Item.self) { item in
+        DetailView(item: item)
+    }
+}
+
+// ❌ WRONG - NavigationView (deprecated)
+NavigationView {
+    List(items) { item in
+        NavigationLink(destination: DetailView(item: item)) {
+            Text(item.name)
+        }
+    }
+}
+
+// ✅ CORRECT - @MainActor for UI updates
+@MainActor
+class ContentViewModel: ObservableObject {
+    @Published var items: [Item] = []
+    
+    func loadData() async {
+        let data = await fetchData()
+        items = data // UI update on main thread
+    }
+}
+
+// ✅ CORRECT - Async/await
+func fetchData() async throws -> [Item] {
+    let (data, _) = try await URLSession.shared.data(from: url)
+    return try JSONDecoder().decode([Item].self, from: data)
+}
+
+// ❌ WRONG - Completion handlers
+func fetchData(completion: @escaping ([Item]?) -> Void) {
+    URLSession.shared.dataTask(with: url) { data, _, _ in
+        completion(items)
+    }.resume()
+}
 
 REQUIRED APP STRUCTURE:
 1. App.swift MUST contain:

@@ -1,0 +1,267 @@
+{
+  "title": "Swift App Architecture Patterns - Comprehensive Guide",
+  "content": "
+    COMPREHENSIVE SWIFT ARCHITECTURE PATTERNS
+
+    1. MVVM (Model-View-ViewModel) Pattern:
+    
+    // Model
+    struct User: Identifiable, Codable {
+        let id: UUID
+        var name: String
+        var email: String
+    }
+    
+    // ViewModel
+    @MainActor
+    class UserViewModel: ObservableObject {
+        @Published var users: [User] = []
+        @Published var isLoading = false
+        @Published var errorMessage: String?
+        
+        func loadUsers() async {
+            isLoading = true
+            errorMessage = nil
+            
+            do {
+                // Simulate API call
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                users = [
+                    User(id: UUID(), name: \"John Doe\", email: \"john@example.com\"),
+                    User(id: UUID(), name: \"Jane Smith\", email: \"jane@example.com\")
+                ]
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            
+            isLoading = false
+        }
+    }
+    
+    // View
+    struct UserListView: View {
+        @StateObject private var viewModel = UserViewModel()
+        
+        var body: some View {
+            NavigationStack {
+                List(viewModel.users) { user in
+                    VStack(alignment: .leading) {
+                        Text(user.name)
+                            .font(.headline)
+                        Text(user.email)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .navigationTitle(\"Users\")
+                .task {
+                    await viewModel.loadUsers()
+                }
+                .overlay {
+                    if viewModel.isLoading {
+                        ProgressView()
+                    }
+                }
+                .alert(\"Error\", isPresented: .constant(viewModel.errorMessage != nil)) {
+                    Button(\"OK\") {
+                        viewModel.errorMessage = nil
+                    }
+                } message: {
+                    Text(viewModel.errorMessage ?? \"\")
+                }
+            }
+        }
+    }
+    
+    2. Observable Framework Pattern (iOS 17+):
+    
+    import SwiftUI
+    import Observation
+    
+    @Observable
+    class ModernViewModel {
+        var items: [String] = []
+        var searchText = \"\"
+        
+        var filteredItems: [String] {
+            if searchText.isEmpty {
+                return items
+            } else {
+                return items.filter { $0.localizedCaseInsensitiveContains(searchText) }
+            }
+        }
+        
+        func addItem(_ item: String) {
+            items.append(item)
+        }
+    }
+    
+    struct ModernView: View {
+        @State private var viewModel = ModernViewModel()
+        
+        var body: some View {
+            NavigationStack {
+                List(viewModel.filteredItems, id: \\.self) { item in
+                    Text(item)
+                }
+                .searchable(text: $viewModel.searchText)
+            }
+        }
+    }
+    
+    3. Coordinator Pattern for Complex Navigation:
+    
+    protocol Coordinator {
+        func start()
+    }
+    
+    @MainActor
+    class AppCoordinator: ObservableObject {
+        @Published var path = NavigationPath()
+        
+        func showDetail(for item: Item) {
+            path.append(item)
+        }
+        
+        func showSettings() {
+            path.append(AppDestination.settings)
+        }
+        
+        func popToRoot() {
+            path.removeLast(path.count)
+        }
+    }
+    
+    enum AppDestination: Hashable {
+        case detail(Item)
+        case settings
+        case profile(userId: String)
+    }
+    
+    4. Repository Pattern for Data Management:
+    
+    protocol UserRepository {
+        func fetchUsers() async throws -> [User]
+        func saveUser(_ user: User) async throws
+        func deleteUser(_ id: UUID) async throws
+    }
+    
+    class RemoteUserRepository: UserRepository {
+        private let apiClient: APIClient
+        
+        init(apiClient: APIClient) {
+            self.apiClient = apiClient
+        }
+        
+        func fetchUsers() async throws -> [User] {
+            return try await apiClient.get(\"/users\")
+        }
+        
+        func saveUser(_ user: User) async throws {
+            try await apiClient.post(\"/users\", body: user)
+        }
+        
+        func deleteUser(_ id: UUID) async throws {
+            try await apiClient.delete(\"/users/\\(id)\")
+        }
+    }
+    
+    5. Dependency Injection Pattern:
+    
+    protocol NetworkService {
+        func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T
+    }
+    
+    @MainActor
+    class DIViewModel: ObservableObject {
+        private let networkService: NetworkService
+        
+        init(networkService: NetworkService = DefaultNetworkService()) {
+            self.networkService = networkService
+        }
+        
+        func loadData() async {
+            do {
+                let data = try await networkService.fetch(DataModel.self, from: URL(string: \"https://api.example.com/data\")!)
+                // Process data
+            } catch {
+                // Handle error
+            }
+        }
+    }
+    
+    6. State Management with Environment:
+    
+    struct AppState: Equatable {
+        var user: User?
+        var isAuthenticated: Bool { user != nil }
+        var preferences = Preferences()
+    }
+    
+    @MainActor
+    class AppStore: ObservableObject {
+        @Published var state = AppState()
+        
+        func login(email: String, password: String) async {
+            // Authentication logic
+        }
+        
+        func logout() {
+            state.user = nil
+        }
+    }
+    
+    // Usage in App
+    @main
+    struct MyApp: App {
+        @StateObject private var store = AppStore()
+        
+        var body: some Scene {
+            WindowGroup {
+                ContentView()
+                    .environmentObject(store)
+            }
+        }
+    }
+    
+    7. Factory Pattern for Object Creation:
+    
+    protocol ViewModelFactory {
+        func makeUserViewModel() -> UserViewModel
+        func makeSettingsViewModel() -> SettingsViewModel
+    }
+    
+    class DefaultViewModelFactory: ViewModelFactory {
+        private let apiClient: APIClient
+        
+        init(apiClient: APIClient) {
+            self.apiClient = apiClient
+        }
+        
+        func makeUserViewModel() -> UserViewModel {
+            return UserViewModel(repository: RemoteUserRepository(apiClient: apiClient))
+        }
+        
+        func makeSettingsViewModel() -> SettingsViewModel {
+            return SettingsViewModel()
+        }
+    }
+  ",
+  "tags": ["architecture", "mvvm", "observable", "coordinator", "repository", "dependency-injection", "state-management", "factory-pattern", "swift", "swiftui", "best-practices"],
+  "severity": "important",
+  "solutions": [
+    "Use MVVM for clear separation of concerns",
+    "Prefer @Observable macro for iOS 17+ apps",
+    "Implement Coordinator pattern for complex navigation flows",
+    "Use Repository pattern to abstract data sources",
+    "Apply Dependency Injection for testability",
+    "Centralize state management with EnvironmentObject",
+    "Use Factory pattern for consistent object creation"
+  ],
+  "examples": {
+    "mvvm": "Perfect for apps with complex business logic",
+    "observable": "Ideal for iOS 17+ modern apps",
+    "coordinator": "Best for apps with deep navigation hierarchies",
+    "repository": "Essential for apps with multiple data sources"
+  }
+}

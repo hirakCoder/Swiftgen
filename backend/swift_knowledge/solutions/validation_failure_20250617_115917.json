@@ -1,0 +1,13 @@
+{
+  "title": "Validation Failure: 2025-06-17 11:59",
+  "content": "Validation failed with 1 errors:\n[NamingConflictValidator] Sources/Models/Task.swift: Reserved type conflict: Task",
+  "tags": [
+    "validation",
+    "failure",
+    "NamingConflictValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

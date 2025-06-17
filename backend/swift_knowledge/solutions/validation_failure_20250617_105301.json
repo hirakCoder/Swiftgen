@@ -1,0 +1,14 @@
+{
+  "title": "Validation Failure: 2025-06-17 10:53",
+  "content": "Validation failed with 2 errors:\n[ArchitectureValidator] Missing required file: App.swift\n[ArchitectureValidator] Missing @main app entry point",
+  "tags": [
+    "validation",
+    "failure",
+    "ArchitectureValidator",
+    "ArchitectureValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

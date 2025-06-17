@@ -1,0 +1,260 @@
+{
+  "title": "iOS Version Migration Guide - iOS 15 to iOS 17+",
+  "content": "
+    IOS VERSION MIGRATION PATTERNS
+
+    1. NAVIGATION MIGRATION (iOS 15 → iOS 16+):
+    
+    // iOS 15 (Deprecated)
+    NavigationView {
+        List(items) { item in
+            NavigationLink(destination: DetailView(item: item)) {
+                Text(item.title)
+            }
+        }
+        .navigationTitle(\"Items\")
+    }
+    
+    // iOS 16+ (Modern)
+    NavigationStack {
+        List(items) { item in
+            NavigationLink(item.title, value: item)
+        }
+        .navigationTitle(\"Items\")
+        .navigationDestination(for: Item.self) { item in
+            DetailView(item: item)
+        }
+    }
+    
+    2. SHEET PRESENTATION (iOS 15 → iOS 16+):
+    
+    // iOS 15
+    .sheet(isPresented: $showSheet) {
+        SheetView()
+    }
+    
+    // iOS 16+ with detents
+    .sheet(isPresented: $showSheet) {
+        SheetView()
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(20)
+    }
+    
+    3. SEARCH FUNCTIONALITY:
+    
+    // iOS 15+
+    .searchable(text: $searchText)
+    
+    // iOS 16+ with tokens
+    .searchable(text: $searchText, tokens: $searchTokens) { token in
+        Label(token.title, systemImage: token.icon)
+    }
+    .searchSuggestions {
+        ForEach(suggestions) { suggestion in
+            Text(suggestion).searchCompletion(suggestion)
+        }
+    }
+    
+    4. OBSERVABLE MACRO (iOS 17+):
+    
+    // Pre-iOS 17 (ObservableObject)
+    class ViewModel: ObservableObject {
+        @Published var count = 0
+        @Published var name = \"\"
+        
+        func increment() {
+            count += 1
+        }
+    }
+    
+    struct OldView: View {
+        @StateObject private var viewModel = ViewModel()
+    }
+    
+    // iOS 17+ (@Observable)
+    @Observable
+    class ModernViewModel {
+        var count = 0
+        var name = \"\"
+        
+        func increment() {
+            count += 1
+        }
+    }
+    
+    struct ModernView: View {
+        @State private var viewModel = ModernViewModel()
+    }
+    
+    5. SCROLL VIEW ENHANCEMENTS:
+    
+    // iOS 15
+    ScrollView {
+        // Content
+    }
+    
+    // iOS 16+
+    ScrollView {
+        // Content
+    }
+    .scrollDismissesKeyboard(.interactively)
+    .scrollIndicators(.hidden)
+    
+    // iOS 17+
+    ScrollView {
+        // Content
+    }
+    .scrollPosition(id: $scrolledID)
+    .scrollTargetBehavior(.paging)
+    .scrollBounceBehavior(.basedOnSize)
+    
+    6. FORM AND PICKER UPDATES:
+    
+    // iOS 15
+    Form {
+        Picker(\"Option\", selection: $selected) {
+            ForEach(options) { option in
+                Text(option.title).tag(option)
+            }
+        }
+    }
+    
+    // iOS 16+
+    Form {
+        Picker(\"Option\", selection: $selected) {
+            ForEach(options) { option in
+                Text(option.title).tag(option)
+            }
+        }
+        .pickerStyle(.navigationLink)
+    }
+    .formStyle(.grouped)
+    
+    7. ANIMATION UPDATES:
+    
+    // iOS 15
+    .animation(.easeInOut)
+    
+    // iOS 16+ (explicit value)
+    .animation(.easeInOut, value: isExpanded)
+    
+    // iOS 17+ (with completion)
+    .animation(.spring) {
+        // Animation body
+    } completion: {
+        // Completion handler
+    }
+    
+    8. TOOLBAR UPDATES:
+    
+    // iOS 15
+    .toolbar {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button(\"Done\") { }
+        }
+    }
+    
+    // iOS 16+
+    .toolbar {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button(\"Share\", systemImage: \"square.and.arrow.up\") { }
+            Button(\"Edit\", systemImage: \"pencil\") { }
+        }
+    }
+    .toolbarRole(.editor)
+    .toolbarBackground(.visible, for: .navigationBar)
+    
+    9. TEXT FIELD UPDATES:
+    
+    // iOS 15
+    TextField(\"Name\", text: $name)
+    
+    // iOS 16+
+    TextField(\"Name\", text: $name, axis: .vertical)
+        .textFieldStyle(.roundedBorder)
+        .textInputAutocapitalization(.words)
+        .submitLabel(.done)
+        .onSubmit {
+            // Handle submission
+        }
+    
+    10. SF SYMBOLS UPDATES:
+    
+    // iOS 15
+    Image(systemName: \"star.fill\")
+    
+    // iOS 16+ (with variable value)
+    Image(systemName: \"speaker.wave.3.fill\")
+        .symbolVariant(.fill)
+        .symbolRenderingMode(.multicolor)
+    
+    // iOS 17+ (with effects)
+    Image(systemName: \"star.fill\")
+        .symbolEffect(.bounce, value: isFavorite)
+        .symbolEffect(.pulse.wholeSymbol, isActive: isLoading)
+    
+    11. SENSORY FEEDBACK (iOS 17+):
+    
+    Button(\"Tap Me\") {
+        // Action
+    }
+    .sensoryFeedback(.impact(flexibility: .soft), trigger: tapCount)
+    
+    12. WIDGET UPDATES:
+    
+    // iOS 16+ (Lock Screen Widgets)
+    struct MyWidget: Widget {
+        var body: some WidgetConfiguration {
+            StaticConfiguration(...) { entry in
+                MyWidgetView(entry: entry)
+            }
+            .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
+        }
+    }
+    
+    13. SWIFT CHARTS (iOS 16+):
+    
+    import Charts
+    
+    Chart(data) { item in
+        BarMark(
+            x: .value(\"Category\", item.category),
+            y: .value(\"Value\", item.value)
+        )
+        .foregroundStyle(by: .value(\"Type\", item.type))
+    }
+    .chartStyle(.automatic)
+    
+    14. PHOTO PICKER (iOS 16+):
+    
+    .photosPicker(isPresented: $showPicker, selection: $selectedItems, maxSelectionCount: 5) {
+        // Picker configuration
+    }
+    
+    15. SHARELINK (iOS 16+):
+    
+    ShareLink(item: url) {
+        Label(\"Share\", systemImage: \"square.and.arrow.up\")
+    }
+  ",
+  "tags": ["ios-versions", "migration", "ios15", "ios16", "ios17", "deprecated", "modern", "updates"],
+  "severity": "critical",
+  "solutions": [
+    "Always check minimum deployment target before using new APIs",
+    "Use @available for conditional API usage",
+    "Prefer modern APIs when targeting iOS 16+",
+    "Test on minimum supported iOS version",
+    "Use NavigationStack over NavigationView for iOS 16+",
+    "Adopt @Observable for iOS 17+ apps",
+    "Update to modern animation APIs with explicit values"
+  ],
+  "migration_checklist": [
+    "Replace NavigationView with NavigationStack",
+    "Update animation calls to include value parameter",
+    "Use modern sheet presentation with detents",
+    "Adopt @Observable for new iOS 17+ projects",
+    "Update deprecated foregroundColor to foregroundStyle",
+    "Use modern toolbar APIs with groups and roles"
+  ]
+}

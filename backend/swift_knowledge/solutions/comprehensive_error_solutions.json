@@ -1,0 +1,218 @@
+{
+  "title": "Comprehensive Swift/SwiftUI Error Solutions Database",
+  "content": "
+    COMPLETE ERROR SOLUTIONS GUIDE
+
+    1. RESERVED TYPE CONFLICTS:
+    
+    ERROR: Cannot find type 'Task' in scope
+    CAUSE: 'Task' is a Swift Concurrency type (Task<Success, Failure>)
+    SOLUTIONS:
+    - Rename to TodoItem, UserTask, WorkItem, ActivityItem
+    - Example fix:
+      // WRONG
+      struct Task {
+          let title: String
+      }
+      
+      // CORRECT
+      struct TodoItem {
+          let title: String
+      }
+    
+    ERROR: 'State' is ambiguous for type lookup
+    CAUSE: Conflicts with @State property wrapper
+    SOLUTIONS:
+    - Rename to AppState, ViewState, ModelState
+    - Use type aliases if needed
+    
+    2. IMPORT ERRORS:
+    
+    ERROR: No such module 'Components'
+    CAUSE: SwiftUI doesn't use module imports for local files
+    SOLUTIONS:
+    - Remove the import statement
+    - Use direct type references
+    - Example:
+      // WRONG
+      import Components
+      import Views
+      
+      // CORRECT
+      import SwiftUI
+      import Foundation
+    
+    3. NAVIGATION ERRORS:
+    
+    ERROR: 'NavigationView' is deprecated
+    CAUSE: NavigationView deprecated in iOS 16+
+    SOLUTION:
+    NavigationStack {
+        // Your content
+    }
+    
+    ERROR: Value of type 'Environment<Binding<PresentationMode>>' has no member 'dismiss'
+    CAUSE: Using old dismissal pattern
+    SOLUTION:
+    @Environment(\\.dismiss) private var dismiss
+    // Then call: dismiss()
+    
+    4. ASYNC/AWAIT ERRORS:
+    
+    ERROR: 'async' call in a function that does not support concurrency
+    SOLUTIONS:
+    - Use .task modifier:
+      .task {
+          await loadData()
+      }
+    - Or Task:
+      Task {
+          await loadData()
+      }
+    
+    5. OBSERVABLE OBJECT ERRORS:
+    
+    ERROR: Accessing StateObject's object without being installed on a View
+    CAUSE: Creating @StateObject outside of View
+    SOLUTION:
+    struct MyView: View {
+        @StateObject private var viewModel = ViewModel() // ✓ Inside View
+    }
+    
+    6. BINDING ERRORS:
+    
+    ERROR: Cannot convert value of type 'String' to expected argument type 'Binding<String>'
+    SOLUTION:
+    TextField(\"Name\", text: $name) // Use $ for binding
+    
+    7. FOREACH ERRORS:
+    
+    ERROR: Referencing initializer 'init(_:content:)' on 'ForEach' requires that 'Item' conform to 'Identifiable'
+    SOLUTIONS:
+    - Make type Identifiable:
+      struct Item: Identifiable {
+          let id = UUID()
+      }
+    - Or specify id:
+      ForEach(items, id: \\.self) { item in
+    
+    8. PREVIEW ERRORS:
+    
+    ERROR: Preview crashed
+    COMMON CAUSES & SOLUTIONS:
+    - Missing @StateObject initialization
+    - Missing environment objects
+    - Correct preview:
+      struct MyView_Previews: PreviewProvider {
+          static var previews: some View {
+              MyView()
+                  .environmentObject(AppState())
+          }
+      }
+    
+    9. TYPE INFERENCE ERRORS:
+    
+    ERROR: Type of expression is ambiguous without more context
+    SOLUTIONS:
+    - Explicit type annotations:
+      let items: [String] = []
+    - Explicit return types:
+      func getItems() -> [String] {
+    
+    10. PROTOCOL CONFORMANCE ERRORS:
+    
+    ERROR: Type 'MyView' does not conform to protocol 'View'
+    CAUSE: Missing 'body' property
+    SOLUTION:
+    struct MyView: View {
+        var body: some View {
+            Text(\"Hello\")
+        }
+    }
+    
+    11. INITIALIZATION ERRORS:
+    
+    ERROR: Missing argument for parameter 'name' in call
+    SOLUTION: Provide all required parameters:
+    User(name: \"John\", email: \"john@example.com\")
+    
+    12. OPTIONAL HANDLING ERRORS:
+    
+    ERROR: Value of optional type 'String?' must be unwrapped
+    SOLUTIONS:
+    - Nil coalescing: text ?? \"\"
+    - Optional binding: if let text = optionalText { }
+    - Map: optionalText.map { Text($0) }
+    
+    13. CLOSURE ERRORS:
+    
+    ERROR: Escaping closure captures mutating 'self' parameter
+    SOLUTION: Use @MainActor or weak self:
+    Task { @MainActor in
+        self.updateUI()
+    }
+    
+    14. MEMORY ERRORS:
+    
+    ERROR: Instance will be immediately deallocated
+    CAUSE: No strong reference
+    SOLUTION: Store in a property:
+    @StateObject private var manager = DataManager()
+    
+    15. SHEET/ALERT ERRORS:
+    
+    ERROR: Attempt to present which is already presenting
+    SOLUTION: Use single source of truth:
+    @State private var activeSheet: ActiveSheet?
+    
+    enum ActiveSheet: Identifiable {
+        case profile, settings
+        var id: Self { self }
+    }
+    
+    16. GESTURE CONFLICTS:
+    
+    ERROR: Gesture conflicts with scrolling
+    SOLUTION:
+    .gesture(DragGesture(), isEnabled: !isScrolling)
+    .simultaneousGesture(TapGesture())
+    
+    17. PERFORMANCE ISSUES:
+    
+    ISSUE: Slow list scrolling
+    SOLUTIONS:
+    - Use LazyVStack instead of VStack
+    - Implement proper Equatable
+    - Avoid complex computations in body
+    - Cache expensive operations
+    
+    18. BUILD SETTING ERRORS:
+    
+    ERROR: iOS Deployment Target '15.0' is older than SDK
+    SOLUTION: Update deployment target in project.yml:
+    targets:
+      App:
+        deploymentTarget:
+          iOS: \"16.0\"
+  ",
+  "tags": ["errors", "solutions", "debugging", "swift", "swiftui", "troubleshooting", "fixes", "common-errors"],
+  "severity": "critical",
+  "solutions": [
+    "Always check for reserved type conflicts first",
+    "Ensure proper imports (no local module imports)",
+    "Use modern navigation patterns (NavigationStack)",
+    "Handle optionals safely without force unwrapping",
+    "Make types Identifiable for ForEach",
+    "Use appropriate property wrappers",
+    "Check protocol conformance requirements"
+  ],
+  "quick_fixes": {
+    "Task": "TodoItem",
+    "State": "AppState", 
+    "Action": "AppAction",
+    "NavigationView": "NavigationStack",
+    "@Environment(\\.presentationMode)": "@Environment(\\.dismiss)",
+    "import Views": "// Remove this import",
+    ".foregroundColor": ".foregroundStyle"
+  }
+}

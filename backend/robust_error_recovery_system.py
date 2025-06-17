@@ -121,7 +121,9 @@ class RobustErrorRecoverySystem:
                 "fixes": [
                     "Add missing import statements",
                     "import SwiftUI for SwiftUI types",
-                    "import Foundation for basic types"
+                    "import Foundation for basic types",
+                    "Remove incorrect module imports",
+                    "Fix relative imports to use file names directly"
                 ]
             },
             "syntax_error": {
@@ -209,25 +211,40 @@ class RobustErrorRecoverySystem:
         fixes_applied = []
 
         # Try each recovery strategy
+        modified_files = swift_files
+        cumulative_fixes = []
+        
         for strategy in self.recovery_strategies:
             try:
                 self.logger.info(f"Attempting recovery strategy: {strategy.__name__}")
-                success, modified_files = await strategy(errors, swift_files, error_analysis)
+                success, modified_files = await strategy(errors, modified_files, error_analysis)
 
                 if success:
-                    self.logger.info(f"Recovery strategy {strategy.__name__} succeeded")
+                    self.logger.info(f"Recovery strategy {strategy.__name__} made changes")
 
                     # Track what was fixed
                     if strategy.__name__ == "_pattern_based_recovery":
-                        fixes_applied.append("Applied pattern-based syntax fixes")
+                        cumulative_fixes.append("Applied pattern-based syntax fixes")
+                        
+                        # CRITICAL: Don't return yet! Let other strategies run too
+                        # Pattern-based fixes might be partial, so we need AI recovery as well
+                        if strategy.__name__ != "_llm_based_recovery":
+                            continue
+                            
                     elif strategy.__name__ == "_llm_based_recovery":
-                        fixes_applied.append("Applied AI-powered fixes")
+                        cumulative_fixes.append("Applied AI-powered fixes")
 
-                    return True, modified_files, fixes_applied
+                    # Only return after trying all strategies or after LLM recovery
+                    if cumulative_fixes and strategy.__name__ == "_llm_based_recovery":
+                        return True, modified_files, cumulative_fixes
 
             except Exception as e:
                 self.logger.error(f"Strategy {strategy.__name__} failed: {e}")
                 continue
+        
+        # If we made any fixes at all, return them
+        if cumulative_fixes:
+            return True, modified_files, cumulative_fixes
 
         # If all strategies fail, try last resort
         return await self._last_resort_recovery(errors, swift_files, error_analysis)
@@ -314,11 +331,15 @@ class RobustErrorRecoverySystem:
         # Check for protocol conformance errors
         has_codable_error = bool(error_analysis.get("protocol_conformance_errors"))
         
+        # Check for module import errors
+        has_module_error = any("no such module" in error for error in errors)
+        
         if not (error_analysis.get("string_literal_errors") or 
                 error_analysis.get("syntax_errors") or 
                 has_persistence_error or 
                 has_codable_error or
-                has_ios_version_error):
+                has_ios_version_error or
+                has_module_error):
             return False, swift_files
 
         modified_files = []
@@ -358,13 +379,73 @@ class RobustErrorRecoverySystem:
                     content
                 )
                 
-                # Replace NavigationStack with NavigationView if simple
-                if content.count('NavigationStack') == 1 and 'navigationDestination' not in content:
-                    content = content.replace('NavigationStack', 'NavigationView')
+                # Modern pattern: Convert NavigationView to NavigationStack (opposite of before!)
+                # NavigationView is deprecated, we should use NavigationStack
+                if 'NavigationView' in content:
+                    content = re.sub(r'NavigationView\s*{', 'NavigationStack {', content)
+                    self.logger.info(f"Migrated NavigationView to NavigationStack in {file['path']}")
+                
+                # Remove iOS 17+ only modifiers
+                ios17_modifiers = [
+                    r'\.scrollBounceBehavior\([^)]*\)',
+                    r'\.contentTransition\([^)]*\)',
+                    r'\.presentationBackground\([^)]*\)',
+                    r'\.presentationCornerRadius\([^)]*\)'
+                ]
+                
+                for modifier in ios17_modifiers:
+                    if re.search(modifier, content):
+                        content = re.sub(modifier, '', content)
+                        self.logger.info(f"Removed iOS 17+ modifier: {modifier}")
+                
+                # Fix deprecated modifiers
+                deprecated_replacements = {
+                    r'\.foregroundColor\(': '.foregroundStyle(',
+                    r'\.accentColor\(': '.tint(',
+                }
+                
+                for old_pattern, new_pattern in deprecated_replacements.items():
+                    if re.search(old_pattern, content):
+                        content = re.sub(old_pattern, new_pattern, content)
+                        self.logger.info(f"Replaced deprecated {old_pattern} with {new_pattern}")
                 
                 if content != original_content:
                     changes_made = True
                     self.logger.info(f"Fixed iOS version compatibility issues in {file['path']}")
+
+            # Fix module import errors
+            if has_module_error:
+                # Check for "no such module 'Components'" or similar
+                modules_removed = []
+                for error in errors:
+                    if "no such module" in error:
+                        match = re.search(r"no such module '([^']+)'", error)
+                        if match:
+                            bad_module = match.group(1)
+                            # Remove the bad import
+                            content = re.sub(rf'import\s+{bad_module}\s*\n', '', content)
+                            modules_removed.append(bad_module)
+                            changes_made = True
+                            self.logger.info(f"Removed incorrect module import '{bad_module}' from {file['path']}")
+                
+                # Also check for incorrect relative imports in SwiftUI
+                # In SwiftUI, we don't use module imports for local files
+                local_modules = ['Views', 'Models', 'ViewModels', 'Components', 'Services', 'Utilities', 'Helpers', 'Extensions']
+                for module in local_modules:
+                    if re.search(rf'import\s+{module}\s*\n', content):
+                        content = re.sub(rf'import\s+{module}\s*\n', '', content)
+                        modules_removed.append(module)
+                        changes_made = True
+                
+                # CRITICAL: Also remove module prefixes from type references
+                # e.g., Components.MyView -> MyView
+                for module in modules_removed:
+                    # Remove module prefix from type references
+                    content = re.sub(rf'{module}\.(\w+)', r'\1', content)
+                    self.logger.info(f"Removed module prefix '{module}.' from type references")
+                
+                if content != original_content:
+                    changes_made = True
 
             # Fix PersistenceController errors by removing Core Data references
             if has_persistence_error:
@@ -595,8 +676,21 @@ class RobustErrorRecoverySystem:
                             files=swift_files
                         )
 
-                        if result and "files" in result:
-                            return True, result["files"]
+                        if result and "files" in result and len(result["files"]) > 0:
+                            # Validate that files have content
+                            valid_files = []
+                            for f in result["files"]:
+                                if isinstance(f, dict) and "content" in f and f["content"]:
+                                    valid_files.append(f)
+                                else:
+                                    # Use original file if recovery failed
+                                    for orig in swift_files:
+                                        if orig.get("path") == f.get("path"):
+                                            valid_files.append(orig)
+                                            break
+                            
+                            if valid_files:
+                                return True, valid_files
 
                     # Fall back to generate_text
                     elif hasattr(self.claude_service, 'generate_text'):
@@ -760,20 +854,27 @@ CRITICAL INSTRUCTIONS:
      * Or remove references if not needed
    - Ensure all referenced types have complete implementations
 
-3. For "switch must be exhaustive" errors:
+3. For "no such module" errors:
+   - In SwiftUI, you DON'T import local folders like 'Components', 'Views', etc.
+   - Only import system frameworks: SwiftUI, Foundation, Combine, etc.
+   - Remove any import statements for local folders
+   - Access types directly without module prefix
+
+4. For "switch must be exhaustive" errors:
    - Add ALL missing cases to the switch statement
    - Or add a default case: default: break
    - Check the enum definition for all cases
 
-4. For string literal errors:
+5. For string literal errors:
    - Use regular double quotes " not fancy quotes " " or ' '
    - Fix: Text("Hello") not Text("Hello") or Text('Hello')
    - Ensure all strings are properly terminated
 
-5. For import errors:
+6. For import errors:
    - Add missing imports at the top of files
    - SwiftUI apps need: import SwiftUI
    - Core Data apps need: import CoreData
+   - DO NOT import local folders like Views, Models, Components
 
 6. For Codable/Encodable/Decodable errors:
    - Add ": Codable" to struct/class declarations that need JSON encoding

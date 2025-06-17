@@ -1,0 +1,286 @@
+{
+  "title": "SwiftUI Best Practices and Advanced Patterns",
+  "content": "
+    SWIFTUI BEST PRACTICES - COMPREHENSIVE GUIDE
+
+    1. VIEW COMPOSITION AND REUSABILITY:
+    
+    // GOOD: Small, focused, reusable views
+    struct UserRow: View {
+        let user: User
+        
+        var body: some View {
+            HStack {
+                AsyncImage(url: URL(string: user.avatarURL)) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ProgressView()
+                }
+                .frame(width: 50, height: 50)
+                .clipShape(Circle())
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(user.name)
+                        .font(.headline)
+                    Text(user.email)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    2. PERFORMANCE OPTIMIZATION:
+    
+    // Use @StateObject for view-owned objects
+    struct ExpensiveView: View {
+        @StateObject private var dataLoader = DataLoader()
+        
+        var body: some View {
+            // View content
+        }
+    }
+    
+    // Use task modifier for async work
+    struct DataView: View {
+        @State private var data: [Item] = []
+        
+        var body: some View {
+            List(data) { item in
+                ItemRow(item: item)
+            }
+            .task {
+                data = await loadData()
+            }
+        }
+    }
+    
+    // Use lazy stacks for large collections
+    ScrollView {
+        LazyVStack {
+            ForEach(items) { item in
+                ItemView(item: item)
+            }
+        }
+    }
+    
+    3. STATE MANAGEMENT BEST PRACTICES:
+    
+    // Use appropriate property wrappers
+    struct ContentView: View {
+        @State private var localState = false              // View-local state
+        @Binding var sharedValue: String                  // Passed from parent
+        @StateObject private var viewModel = ViewModel()  // View-owned ObservableObject
+        @ObservedObject var sharedModel: SharedModel      // Injected ObservableObject
+        @EnvironmentObject var appState: AppState         // Global state
+        @Environment(\\.dismiss) private var dismiss       // Environment values
+        
+        var body: some View {
+            // View implementation
+        }
+    }
+    
+    4. CUSTOM MODIFIERS AND EXTENSIONS:
+    
+    // Create reusable view modifiers
+    struct CardStyle: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .padding()
+                .background(Color(.systemBackground))
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
+        }
+    }
+    
+    extension View {
+        func cardStyle() -> some View {
+            modifier(CardStyle())
+        }
+    }
+    
+    // Usage
+    VStack {
+        Text(\"Hello\")
+    }
+    .cardStyle()
+    
+    5. CONDITIONAL VIEWS AND TYPE ERASURE:
+    
+    // GOOD: Type-safe conditional rendering
+    struct ConditionalView: View {
+        @State private var showDetails = false
+        
+        var body: some View {
+            VStack {
+                if showDetails {
+                    DetailView()
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing),
+                            removal: .move(edge: .leading)
+                        ))
+                } else {
+                    SummaryView()
+                }
+            }
+            .animation(.spring(), value: showDetails)
+        }
+    }
+    
+    6. NAVIGATION PATTERNS (iOS 16+):
+    
+    struct NavigationExample: View {
+        @State private var path = NavigationPath()
+        
+        var body: some View {
+            NavigationStack(path: $path) {
+                List {
+                    NavigationLink(\"Users\", value: NavigationDestination.users)
+                    NavigationLink(\"Settings\", value: NavigationDestination.settings)
+                }
+                .navigationDestination(for: NavigationDestination.self) { destination in
+                    switch destination {
+                    case .users:
+                        UsersView()
+                    case .settings:
+                        SettingsView()
+                    case .userDetail(let user):
+                        UserDetailView(user: user)
+                    }
+                }
+            }
+        }
+    }
+    
+    enum NavigationDestination: Hashable {
+        case users
+        case settings
+        case userDetail(User)
+    }
+    
+    7. GESTURE HANDLING:
+    
+    struct GestureView: View {
+        @State private var offset = CGSize.zero
+        @State private var isDragging = false
+        
+        var body: some View {
+            RoundedRectangle(cornerRadius: 20)
+                .fill(isDragging ? Color.blue : Color.green)
+                .frame(width: 100, height: 100)
+                .offset(offset)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            offset = value.translation
+                            isDragging = true
+                        }
+                        .onEnded { _ in
+                            withAnimation(.spring()) {
+                                offset = .zero
+                                isDragging = false
+                            }
+                        }
+                )
+        }
+    }
+    
+    8. CUSTOM LAYOUTS (iOS 16+):
+    
+    struct FlowLayout: Layout {
+        var spacing: CGFloat = 8
+        
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            let result = FlowResult(
+                in: proposal.replacingUnspecifiedDimensions().width,
+                subviews: subviews,
+                spacing: spacing
+            )
+            return result.size
+        }
+        
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            let result = FlowResult(
+                in: bounds.width,
+                subviews: subviews,
+                spacing: spacing
+            )
+            for (index, subview) in subviews.enumerated() {
+                subview.place(at: CGPoint(x: result.positions[index].x + bounds.minX,
+                                         y: result.positions[index].y + bounds.minY),
+                             proposal: .unspecified)
+            }
+        }
+    }
+    
+    9. ACCESSIBILITY:
+    
+    struct AccessibleView: View {
+        var body: some View {
+            Button(action: performAction) {
+                Image(systemName: \"star.fill\")
+                    .font(.title)
+            }
+            .accessibilityLabel(\"Add to favorites\")
+            .accessibilityHint(\"Double tap to add this item to your favorites\")
+            .accessibilityAddTraits(.isButton)
+        }
+        
+        func performAction() {
+            // Action implementation
+        }
+    }
+    
+    10. ERROR HANDLING IN VIEWS:
+    
+    struct ErrorHandlingView: View {
+        @State private var errorWrapper: ErrorWrapper?
+        
+        var body: some View {
+            ContentView()
+                .alert(item: $errorWrapper) { wrapper in
+                    Alert(
+                        title: Text(\"Error\"),
+                        message: Text(wrapper.error.localizedDescription),
+                        dismissButton: .default(Text(\"OK\"))
+                    )
+                }
+                .task {
+                    do {
+                        try await performRiskyOperation()
+                    } catch {
+                        errorWrapper = ErrorWrapper(error: error)
+                    }
+                }
+        }
+    }
+    
+    struct ErrorWrapper: Identifiable {
+        let id = UUID()
+        let error: Error
+    }
+  ",
+  "tags": ["swiftui", "best-practices", "performance", "state-management", "navigation", "gestures", "accessibility", "error-handling", "view-composition", "custom-layouts"],
+  "severity": "critical",
+  "solutions": [
+    "Break views into small, reusable components",
+    "Use appropriate property wrappers for state management",
+    "Implement proper navigation patterns for iOS 16+",
+    "Always consider accessibility from the start",
+    "Handle errors gracefully with user-friendly messages",
+    "Optimize performance with lazy loading and proper state management",
+    "Create custom view modifiers for consistent styling"
+  ],
+  "antipatterns": [
+    "Avoid massive view bodies - extract to smaller views",
+    "Don't use AnyView unnecessarily - it hurts performance",
+    "Don't ignore accessibility - it's crucial for all users",
+    "Avoid force unwrapping - handle optionals safely",
+    "Don't put business logic in views - use ViewModels"
+  ]
+}

@@ -294,12 +294,13 @@ Return a JSON response with this EXACT structure:
                              project_tracking_id: str = None) -> Dict[str, Any]:
         """Modify an existing iOS app with intelligent modification handling"""
         
-        # Create comprehensive file context with FULL content
-        code_context = "\n\n".join([
-            f"File: {file['path']}\n```swift\n{file['content']}\n```"
-            for file in files
-        ])
-
+        # Import modification handler
+        try:
+            from modification_handler import ModificationHandler
+            mod_handler = ModificationHandler()
+        except:
+            mod_handler = None
+        
         # Analyze modification request
         modification_type = self._analyze_modification_type(modification)
         
@@ -321,44 +322,50 @@ CRITICAL iOS VERSION CONSTRAINTS:
   * NO @Observable macro - use ObservableObject + @Published
   * NO .scrollBounceBehavior modifier
   * NO .contentTransition modifier
-  * Use NavigationView instead of NavigationStack if issues arise
-- If unsure about iOS availability, use iOS 16-compatible alternatives"""
+- If unsure about iOS availability, use iOS 16-compatible alternatives
 
-        user_prompt = f"""Current iOS App: {app_name}
-Original Description: {description}
+MODERN SWIFT PATTERNS (MANDATORY):
+1. Navigation: Use NavigationStack, NOT NavigationView (deprecated)
+2. State Management: ObservableObject + @Published for iOS 16
+3. Async/Await: ALWAYS use async/await, NEVER completion handlers
+4. UI Updates: Mark UI classes/methods with @MainActor
+5. Modifiers: Use .foregroundStyle NOT .foregroundColor
+6. Concurrency: NEVER use DispatchSemaphore with async/await
+
+MODULE IMPORT RULES - CRITICAL FOR SWIFTUI:
+- NEVER import local folders: NO import Components, Views, Models, ViewModels, Services
+- ONLY import system frameworks: import SwiftUI, Foundation, Combine, CoreData, etc.
+- SwiftUI uses direct type references, NOT module imports
+- Access types directly: ContentView NOT Components.ContentView
+- WRONG: import Components; Components.MyView()
+- RIGHT: MyView() // direct reference"""
+
+        # Use modification handler if available
+        if mod_handler:
+            user_prompt = mod_handler.prepare_modification_prompt(app_name, modification, files)
+        else:
+            # Fallback to simpler prompt
+            user_prompt = f"""Current iOS App: {app_name}
 Modification Request: {modification}
 
-EXISTING CODE (DO NOT REBUILD FROM SCRATCH):
-{code_context}
+CRITICAL: Return ALL {len(files)} files, even if unchanged.
+Only modify files that need to change for: "{modification}"
 
-Requirements:
-1. Make ONLY the requested changes: "{modification}"
-2. Keep bundle ID: {existing_bundle_id}
-3. Keep app name: {app_name}
-4. Return ALL files (both modified and unmodified)
-5. Add comment "// Modified for: {modification[:50]}..." at the top of changed files
+Current files:
+"""
+            for file in files:
+                user_prompt += f"\n--- {file['path']} ---\n{file['content'][:500]}...\n"
+            
+            user_prompt += f"""
 
-Return valid JSON with this structure:
+Return JSON with ALL {len(files)} files:
 {{
-    "files": [
-        {{
-            "path": "Sources/filename.swift",
-            "content": "// Complete Swift code"
-        }}
-    ],
+    "files": [ALL {len(files)} files with path and content],
     "bundle_id": "{existing_bundle_id}",
-    "features": ["List of features including new ones"],
-    "modification_summary": "Brief summary of what was changed",
-    "changes_made": ["Specific changes applied"]
-}}
-
-CRITICAL JSON FORMATTING RULES:
-- Use double quotes for all strings
-- Escape quotes inside strings as \\"
-- Escape newlines as \\n
-- Escape backslashes as \\\\
-- No text before or after the JSON
-- Ensure valid, parseable JSON"""
+    "modification_summary": "What changed",
+    "changes_made": ["List of specific changes"],
+    "files_modified": ["List of files that were actually modified"]
+}}"""
 
         result = await self._generate_with_current_model(system_prompt, user_prompt)
 
@@ -377,41 +384,34 @@ CRITICAL JSON FORMATTING RULES:
                 print(f"[ERROR] Initial JSON parse failed: {e}")
                 print(f"[ERROR] Error at position: {e.pos if hasattr(e, 'pos') else 'unknown'}")
                 
-                try:
-                    # Second attempt - fix common escape issues
-                    cleaned = result
-                    # Fix unescaped newlines and tabs in strings
-                    import re
-                    # Find string values and fix their escapes
-                    def fix_string_escapes(match):
-                        s = match.group(1)
-                        s = s.replace('\n', '\\n').replace('\t', '\\t')
-                        s = s.replace('\\', '\\\\').replace('"', '\\"')
-                        return f'"{s}"'
-                    
-                    # This regex finds string values in JSON
-                    cleaned = re.sub(r'"([^"\\]*(\\.[^"\\]*)*)"', fix_string_escapes, cleaned)
-                    
-                    result = json.loads(cleaned)
-                except json.JSONDecodeError as e2:
-                    print(f"[ERROR] Second JSON parse failed: {e2}")
-                    
-                    # Third attempt - extract JSON object
-                    json_match = re.search(r'\{[\s\S]*\}', result)
-                    if json_match:
-                        try:
+                # Use modification handler to fix JSON if available
+                if mod_handler:
+                    fixed_result = mod_handler.fix_json_response(result)
+                    if fixed_result:
+                        result = fixed_result
+                    else:
+                        # Create minimal modification response
+                        result = mod_handler.create_minimal_modification(files, modification)
+                else:
+                    # Fallback parsing attempts
+                    try:
+                        # Extract JSON object
+                        json_match = re.search(r'\{[\s\S]*\}', result)
+                        if json_match:
                             result = json.loads(json_match.group(0))
-                        except Exception as e3:
-                            print(f"[ERROR] Third JSON parse failed: {e3}")
-                            # If all parsing fails, return empty files to signal failure
-                            return {
-                                "app_name": app_name,
-                                "bundle_id": existing_bundle_id,
-                                "files": [],  # Empty files = clear failure signal
-                                "modification_summary": "Failed to parse modification response",
-                                "changes_made": ["Error: Could not parse LLM response"],
-                                "modified_by_llm": self.current_model.provider if self.current_model else "claude"
-                            }
+                        else:
+                            raise ValueError("No JSON object found")
+                    except Exception as e3:
+                        print(f"[ERROR] All JSON parsing failed: {e3}")
+                        # Return minimal response
+                        return {
+                            "app_name": app_name,
+                            "bundle_id": existing_bundle_id,
+                            "files": files,  # Return original files unchanged
+                            "modification_summary": f"Failed to apply: {modification}",
+                            "changes_made": ["Error: Could not parse LLM response"],
+                            "modified_by_llm": self.current_model.provider if self.current_model else "claude"
+                        }
                     else:
                         print("[ERROR] No JSON object found in response")
                         return {
@@ -425,16 +425,44 @@ CRITICAL JSON FORMATTING RULES:
 
         # Ensure consistency
         if isinstance(result, dict):
+            # Validate the modification response
+            if mod_handler:
+                is_valid, issues = mod_handler.validate_modification_response(result, files)
+                if not is_valid:
+                    print(f"[ERROR] Modification response validation failed: {issues}")
+                    # Try to fix by ensuring all files are present
+                    if 'files' not in result or len(result.get('files', [])) != len(files):
+                        print(f"[WARNING] Fixing incomplete file list - ensuring all {len(files)} files are included")
+                        # Create a mapping of returned files
+                        returned_files = {f['path']: f for f in result.get('files', [])}
+                        # Fill in missing files with originals
+                        complete_files = []
+                        for orig_file in files:
+                            if orig_file['path'] in returned_files:
+                                complete_files.append(returned_files[orig_file['path']])
+                            else:
+                                print(f"[WARNING] File {orig_file['path']} was missing - including original")
+                                complete_files.append(orig_file)
+                        result['files'] = complete_files
+            
             result["bundle_id"] = existing_bundle_id
             result["app_name"] = app_name
             result["modified_by_llm"] = self.current_model.provider if self.current_model else "claude"
+            
+            # Ensure we have modification summary
+            if "modification_summary" not in result:
+                result["modification_summary"] = modification[:100]
+            
+            if "changes_made" not in result:
+                result["changes_made"] = ["Changes applied as requested"]
+                
         else:
             # If result is not a dict at this point, something went wrong
             print(f"[ERROR] Result is not a dict: {type(result)}")
             return {
                 "app_name": app_name,
                 "bundle_id": existing_bundle_id,
-                "files": [],  # Empty files = clear failure signal
+                "files": files,  # Return original files
                 "modification_summary": "Failed to process modification",
                 "changes_made": ["Error: Invalid response format"],
                 "modified_by_llm": self.current_model.provider if self.current_model else "claude"

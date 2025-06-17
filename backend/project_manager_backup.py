@@ -370,7 +370,7 @@ class ProjectManager:
         return project_path
 
     async def update_project_files(self, project_id: str, modified_files: List[Dict]) -> bool:
-        """Update project files after modification - fixed to write ALL files"""
+        """Update project files after modification with duplicate detection"""
 
         project_path = await self.get_project_path(project_id)
         if not project_path:
@@ -385,53 +385,65 @@ class ProjectManager:
         safe_product_name = metadata.get('product_name')
         safe_target_name = metadata.get('target_name')
 
+        # Track filenames to detect duplicates
+        filename_to_paths = {}
         updated_files = []
-        failed_files = []
-        
-        print(f"[PROJECT MANAGER] Updating {len(modified_files)} files for project {project_id}")
 
-        # Write ALL files provided by the LLM
+        # First pass: collect all file paths and check for duplicates
         for file_info in modified_files:
-            try:
-                original_path = file_info.get("path", "")
-                content = file_info.get("content", "")
-                
-                if not original_path or not content:
-                    print(f"[PROJECT MANAGER] Skipping empty file entry")
-                    continue
+            original_path = file_info.get("path", "")
+            content = file_info.get("content", "")
 
-                # Fix file path
-                fixed_path = self._fix_file_path(original_path)
-                if not fixed_path:
-                    print(f"[PROJECT MANAGER] Skipping non-Swift file: {original_path}")
-                    continue
+            # Fix file path
+            fixed_path = self._fix_file_path(original_path)
+            if not fixed_path:
+                continue
 
-                # Ensure the file is in Sources directory
-                if not fixed_path.startswith("Sources/"):
-                    fixed_path = f"Sources/{os.path.basename(fixed_path)}"
+            # Ensure the file is in Sources directory
+            if not fixed_path.startswith("Sources/"):
+                fixed_path = f"Sources/{os.path.basename(fixed_path)}"
 
-                file_path = os.path.join(project_path, fixed_path)
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                
-                # Log what we're writing
-                print(f"[PROJECT MANAGER] Writing file: {fixed_path} ({len(content)} bytes)")
+            # Extract filename for duplicate detection
+            filename = os.path.basename(fixed_path)
+            
+            if filename in filename_to_paths:
+                print(f"[PROJECT MANAGER] WARNING: Duplicate filename '{filename}' detected!")
+                print(f"  Existing: {filename_to_paths[filename]}")
+                print(f"  New: {fixed_path}")
+                # Skip duplicate files - keep the first one
+                continue
+            
+            filename_to_paths[filename] = fixed_path
 
-                with open(file_path, 'w') as f:
-                    f.write(content)
+        # Second pass: write files (only non-duplicates)
+        for file_info in modified_files:
+            original_path = file_info.get("path", "")
+            content = file_info.get("content", "")
 
-                updated_files.append(fixed_path)
-                
-            except Exception as e:
-                error_msg = f"Failed to write {original_path}: {str(e)}"
-                print(f"[PROJECT MANAGER] ERROR: {error_msg}")
-                failed_files.append(error_msg)
+            # Fix file path
+            fixed_path = self._fix_file_path(original_path)
+            if not fixed_path:
+                continue
 
-        # Report results
-        print(f"[PROJECT MANAGER] Successfully wrote {len(updated_files)} files")
-        if failed_files:
-            print(f"[PROJECT MANAGER] Failed to write {len(failed_files)} files: {failed_files}")
-            # Don't raise exception - partial success is better than total failure
-            # raise Exception(f"Failed to write {len(failed_files)} files: {failed_files}")
+            # Ensure the file is in Sources directory
+            if not fixed_path.startswith("Sources/"):
+                fixed_path = f"Sources/{os.path.basename(fixed_path)}"
+
+            # Only write if this path is the chosen one for this filename
+            filename = os.path.basename(fixed_path)
+            if filename_to_paths.get(filename) != fixed_path:
+                continue
+
+            file_path = os.path.join(project_path, fixed_path)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            with open(file_path, 'w') as f:
+                f.write(content)
+
+            updated_files.append(fixed_path)
+
+        # Clean up any existing duplicate files
+        self._cleanup_duplicate_files(project_path, filename_to_paths)
 
         # Update metadata
         metadata['files'] = updated_files

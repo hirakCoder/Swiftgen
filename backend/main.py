@@ -45,6 +45,34 @@ except ImportError:
     print("Warning: runtime_error_handler.py not found. Advanced crash log parsing disabled.")
     runtime_handler = None
 
+try:
+    from modification_verifier import ModificationVerifier
+    modification_verifier = ModificationVerifier()
+except ImportError:
+    print("Warning: modification_verifier.py not found. Modification verification disabled.")
+    modification_verifier = None
+
+try:
+    from modification_handler import ModificationHandler
+    modification_handler = ModificationHandler()
+except ImportError:
+    print("Warning: modification_handler.py not found. Enhanced modification handling disabled.")
+    modification_handler = None
+
+try:
+    from pre_generation_validator import PreGenerationValidator
+    pre_generation_validator = PreGenerationValidator()
+except ImportError:
+    print("Warning: pre_generation_validator.py not found. Pre-generation validation disabled.")
+    pre_generation_validator = None
+
+try:
+    from comprehensive_code_validator import ComprehensiveCodeValidator
+    comprehensive_validator = ComprehensiveCodeValidator(ios_target="16.0")
+except ImportError:
+    print("Warning: comprehensive_code_validator.py not found. Comprehensive validation disabled.")
+    comprehensive_validator = None
+
 # Initialize RAG Knowledge Base
 rag_knowledge_base = None
 try:
@@ -338,9 +366,18 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
             "description": request.description[:100] + "..." if len(request.description) > 100 else request.description
         })
 
+        # Pre-generation validation to prevent reserved type issues
+        validated_description = request.description
+        if pre_generation_validator:
+            validated_app_name, validated_description = pre_generation_validator.validate_and_enhance_prompt(
+                app_name, request.description
+            )
+            if validated_description != request.description:
+                print(f"[MAIN] Pre-generation validation: Enhanced prompt to prevent reserved types")
+
         # Step 1: Generate with self-healing and UNIQUENESS
         # Detect if this is a complex app that needs advanced generation
-        is_complex_app = _is_complex_app(request.description)
+        is_complex_app = _is_complex_app(validated_description)
         
         if is_complex_app:
             await notify_clients(project_id, {
@@ -358,17 +395,17 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
         # Use advanced generator for complex apps
         if is_complex_app:
             generated_code = await advanced_generator.generate_advanced_app(
-                description=request.description,
+                description=validated_description,
                 app_name=app_name
             )
         elif hasattr(enhanced_service, 'generate_ios_app_multi_llm'):
             generated_code = await enhanced_service.generate_ios_app_multi_llm(
-                description=request.description,
+                description=validated_description,
                 app_name=app_name
             )
         elif hasattr(enhanced_service, 'generate_ios_app'):
             generated_code = await enhanced_service.generate_ios_app(
-                description=request.description,
+                description=validated_description,
                 app_name=app_name
             )
         else:
@@ -391,6 +428,30 @@ Important: Return ONLY valid JSON, no explanatory text."""
                 generated_code = json.loads(result["text"])
             else:
                 raise Exception(f"Generation failed: {result.get('error', 'Unknown error')}")
+
+        # Post-generation validation
+        if pre_generation_validator:
+            is_valid, issues = pre_generation_validator.validate_generated_code(generated_code)
+            if not is_valid:
+                print(f"[MAIN] Post-generation validation found issues: {issues}")
+                # Fix the issues
+                generated_code = pre_generation_validator.fix_reserved_types_in_code(generated_code)
+                print(f"[MAIN] Applied automatic fixes for reserved type issues")
+        
+        # Comprehensive validation
+        if comprehensive_validator and "files" in generated_code:
+            comp_issues = comprehensive_validator.validate_files(generated_code["files"])
+            if comp_issues:
+                print(f"[MAIN] Comprehensive validation found {len(comp_issues)} issues")
+                # Fix critical issues
+                critical_issues = [i for i in comp_issues if i.severity == 'error']
+                if critical_issues:
+                    print(f"[MAIN] Fixing {len(critical_issues)} critical issues")
+                    fixed_files = comprehensive_validator.fix_issues(
+                        generated_code["files"], 
+                        critical_issues
+                    )
+                    generated_code["files"] = fixed_files
 
         # Track which LLM was used
         llm_used = generated_code.get("generated_by_llm", "unknown")
@@ -584,7 +645,6 @@ Important: Return ONLY valid JSON, no explanatory text."""
 🎨 Unique Implementation: {unique_info}
 ✨ Features: {features_text}
 🤖 Generated by: {llm_used.upper()}
-📊 Quality Score: {_calculate_quality_score(validation_result)}%
 ⏱️ Total Time: {time_display}"""
 
             await notify_clients(project_id, {
@@ -596,7 +656,6 @@ Important: Return ONLY valid JSON, no explanatory text."""
                 "app_name": app_name,
                 "features": generated_code.get("features", []),
                 "unique_aspects": unique_info,
-                "quality_score": _calculate_quality_score(validation_result),
                 "generated_by_llm": llm_used,
                 "files_count": len(generated_code.get("files", [])),
                 "total_time": total_time,
@@ -795,6 +854,70 @@ Return a JSON response with the modified files and changes made."""
 
         # Track which LLM was used for modification
         llm_used = modified_code.get("modified_by_llm", "unknown")
+        
+        # Verify modifications were actually applied
+        if modification_verifier:
+            print(f"[MAIN] Verifying modifications...")
+            verification_success, verification_issues = modification_verifier.verify_modifications(
+                files_to_modify,
+                modified_code.get("files", []),
+                request.modification,
+                verbose=True
+            )
+            
+            if not verification_success:
+                print(f"[MAIN] Modification verification failed: {verification_issues}")
+                
+                # Try to recover by asking LLM again with specific instructions
+                await notify_clients(project_id, {
+                    "type": "status",
+                    "message": "🔄 Ensuring all files are properly modified...",
+                    "status": "retrying"
+                })
+                
+                # Create recovery prompt
+                recovery_prompt = f"""The previous modification was incomplete. 
+                Issues found: {', '.join(verification_issues)}
+                
+                CRITICAL: You must return ALL {len(files_to_modify)} files, even if some remain unchanged.
+                Original modification request: {request.modification}
+                
+                Return the complete set of files with the requested modifications applied."""
+                
+                # Retry the modification
+                try:
+                    if hasattr(enhanced_service, 'modify_ios_app'):
+                        modified_code = await enhanced_service.modify_ios_app(
+                            app_name,
+                            context.get("description", ""),
+                            recovery_prompt,
+                            files_to_modify,
+                            existing_bundle_id=bundle_id
+                        )
+                        
+                        # Verify again
+                        verification_success, verification_issues = modification_verifier.verify_modifications(
+                            files_to_modify,
+                            modified_code.get("files", []),
+                            request.modification,
+                            verbose=True
+                        )
+                        
+                        if not verification_success:
+                            print(f"[MAIN] Recovery attempt still failed: {verification_issues}")
+                            # Continue anyway - partial success is better than failure
+                    
+                except Exception as e:
+                    print(f"[MAIN] Modification recovery failed: {e}")
+                    # Continue with original response
+        
+        # Generate modification report
+        if modification_verifier:
+            modification_report = modification_verifier.generate_modification_report(
+                files_to_modify,
+                modified_code.get("files", [])
+            )
+            print(f"[MAIN] Modification report: {modification_report}")
 
         # Validate modifications
         await notify_clients(project_id, {
@@ -899,14 +1022,21 @@ Return a JSON response with the modified files and changes made."""
             changes_detail = modified_code.get("changes_made", [])
             changes_text = '\n'.join(f"• {change}" for change in changes_detail[:5]) if changes_detail else modification_summary
             
+            # Get more changes if available
+            all_changes = changes_detail[:10] if changes_detail else []
+            changes_text = '\n'.join(f"• {change}" for change in all_changes) if all_changes else modification_summary
+            
             detailed_message = f"""✅ {app_name} has been modified successfully!
 
 📝 Changes Applied:
 {changes_text}
 
 🤖 Modified by: {llm_used.upper()}
-📊 Quality Score: {_calculate_quality_score(validation_result)}%
 📁 Files Updated: {len(modified_code.get("files", []))}"""
+            
+            # Add simulator info if launched
+            if hasattr(build_result, 'simulator_launched') and build_result.simulator_launched:
+                detailed_message += "\n\n📱 The modified app is now running in the iOS Simulator!"
 
             await notify_clients(project_id, {
                 "type": "complete",
@@ -918,7 +1048,6 @@ Return a JSON response with the modified files and changes made."""
                 "changes_made": changes_detail,
                 "modified_by_llm": llm_used,
                 "files_updated": len(modified_code.get("files", [])),
-                "quality_score": _calculate_quality_score(validation_result)
             })
 
             # Send updated files to frontend
@@ -938,7 +1067,6 @@ Return a JSON response with the modified files and changes made."""
                 "files": modified_code.get("files", []),  # Include for frontend
                 "modification_summary": modification_summary,
                 "modified_by_llm": llm_used,
-                "quality_score": _calculate_quality_score(validation_result)
             }
         else:
             await notify_clients(project_id, {
