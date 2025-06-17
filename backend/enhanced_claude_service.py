@@ -225,6 +225,10 @@ Return a JSON response with this EXACT structure:
                     if "..." in content and re.search(r'(class|struct|enum)\s+\w+\.\.\.', content):
                         logger.warning(f"Detected truncated code in {file.get('path', 'unknown')}")
                         raise Exception("Generated code appears to be truncated. Retrying with higher token limit...")
+            
+            # Add LLM provider info to result
+            if self.current_model:
+                result["generated_by_llm"] = self.current_model.provider
 
             return result
 
