@@ -110,16 +110,34 @@ class SelfHealingGenerator:
         if not self.rag_kb:
             return []
 
-        # Search for similar successful apps
+        # Search for similar successful apps and patterns
         similar_apps = self.rag_kb.search(description, k=5)
+        
+        # Also search for architecture patterns
+        arch_patterns = self.rag_kb.search(f"architecture {description}", k=2)
+        
+        # Search for common issues with this type of app
+        issue_patterns = self.rag_kb.search(f"errors {description}", k=3)
 
         working_patterns = []
+        
+        # Extract successful patterns
         for app in similar_apps:
-            # Only use successful patterns
-            if app.get('severity') == 'info' and 'success' in app.get('tags', []):
+            # Use patterns from all severity levels
+            if app.get('tags') and any(tag in app.get('tags', []) for tag in ['architecture', 'best-practices', 'patterns']):
                 working_patterns.append({
                     'description': app.get('title', ''),
-                    'patterns': self._extract_patterns_from_content(app.get('content', ''))
+                    'patterns': self._extract_patterns_from_content(app.get('content', '')),
+                    'solutions': app.get('solutions', [])
+                })
+        
+        # Add architecture patterns
+        for pattern in arch_patterns:
+            if 'architecture' in pattern.get('tags', []):
+                working_patterns.append({
+                    'description': f"Architecture: {pattern.get('title', '')}",
+                    'patterns': self._extract_patterns_from_content(pattern.get('content', '')),
+                    'solutions': pattern.get('solutions', [])
                 })
 
         return working_patterns
@@ -180,6 +198,12 @@ class SelfHealingGenerator:
         if "reserved_type" in predicted_issues:
             constraints.append("- Use 'TodoItem' instead of 'Task' for any task-related structs")
             constraints.append("- Use 'AppState' instead of 'State' for state management")
+            
+            # Add RAG-based alternatives if available
+            if self.rag_kb:
+                task_alternatives = self.rag_kb.get_naming_alternatives('Task')
+                if task_alternatives:
+                    constraints.append(f"- Alternative names for Task: {', '.join(task_alternatives[:3])}")
 
         if "environment_issue" in predicted_issues:
             constraints.append("- Use @Environment(\\.dismiss) for iOS 16+ dismissal")
@@ -191,6 +215,18 @@ class SelfHealingGenerator:
             constraints.append("- If using ANY SwiftUI components, start with 'import SwiftUI'")
             constraints.append("- If using ObservableObject or @Published, also import Combine")
             constraints.append("- ViewModels that use SwiftUI types MUST import SwiftUI")
+        
+        # Add RAG-based best practices if available
+        if self.rag_kb and predicted_issues:
+            # Query RAG for prevention strategies
+            prevention_results = self.rag_kb.search(f"prevent {' '.join(predicted_issues[:3])}", k=2)
+            
+            for result in prevention_results:
+                if result.get('severity') in ['critical', 'important']:
+                    solutions = result.get('solutions', [])
+                    for solution in solutions[:2]:  # Add top 2 solutions
+                        if solution not in constraints:
+                            constraints.append(f"- {solution}")
 
         return "\n".join(constraints)
 

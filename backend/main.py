@@ -61,7 +61,7 @@ except ImportError:
 
 try:
     from pre_generation_validator import PreGenerationValidator
-    pre_generation_validator = PreGenerationValidator()
+    pre_generation_validator = PreGenerationValidator(rag_kb=rag_knowledge_base if 'rag_knowledge_base' in locals() else None)
 except ImportError:
     print("Warning: pre_generation_validator.py not found. Pre-generation validation disabled.")
     pre_generation_validator = None
@@ -79,6 +79,11 @@ try:
     from rag_knowledge_base import RAGKnowledgeBase
     rag_knowledge_base = RAGKnowledgeBase()
     print("✓ RAG Knowledge Base initialized")
+    
+    # Re-initialize pre_generation_validator with RAG if it exists
+    if pre_generation_validator and hasattr(pre_generation_validator, 'rag_kb'):
+        pre_generation_validator.rag_kb = rag_knowledge_base
+        print("✓ Pre-generation validator enhanced with RAG support")
 except Exception as e:
     print(f"Warning: RAG Knowledge Base not available: {e}")
 

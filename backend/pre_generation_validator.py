@@ -9,7 +9,10 @@ from typing import Dict, List, Tuple
 class PreGenerationValidator:
     """Validates and fixes generation requests before they reach the LLM"""
     
-    def __init__(self):
+    def __init__(self, rag_kb=None):
+        # Store RAG knowledge base
+        self.rag_kb = rag_kb
+        
         # Import comprehensive validator if available
         try:
             from comprehensive_code_validator import ComprehensiveCodeValidator
@@ -65,6 +68,35 @@ class PreGenerationValidator:
         
         # Build comprehensive warnings
         warnings = []
+        
+        # Query RAG for similar app patterns if available
+        if self.rag_kb:
+            # Search for similar apps and patterns
+            similar_apps = self.rag_kb.search(f"{app_name} {description}", k=3)
+            
+            # Extract patterns and potential issues
+            rag_warnings = []
+            rag_patterns = []
+            
+            for result in similar_apps:
+                if result.get('severity') in ['critical', 'important']:
+                    # Check for naming conflicts
+                    if 'reserved-types' in result.get('tags', []):
+                        solutions = result.get('solutions', [])
+                        for solution in solutions:
+                            if solution not in rag_warnings:
+                                rag_warnings.append(solution)
+                    
+                    # Check for architecture patterns
+                    if 'architecture' in result.get('tags', []):
+                        content = result.get('content', '')
+                        if 'MVVM' in content and 'mvvm' not in rag_patterns:
+                            rag_patterns.append('mvvm')
+                        if 'Observable' in content and 'observable' not in rag_patterns:
+                            rag_patterns.append('observable')
+            
+            # Add RAG-based warnings
+            warnings.extend(rag_warnings)
         
         # Check if this is a TODO/Task app
         is_todo_app = any(word in app_name_lower or word in description_lower 
@@ -179,3 +211,36 @@ ALWAYS prefix your custom types to avoid conflicts!"""
             content = re.sub(rf'\[{reserved}\]', f'[{replacement}]', content)
             
         return content
+    
+    def get_architecture_guidance(self, app_name: str, description: str) -> str:
+        """Get architectural guidance from RAG based on app type"""
+        
+        if not self.rag_kb:
+            return ""
+        
+        guidance = []
+        
+        # Search for architecture patterns
+        arch_results = self.rag_kb.search(f"architecture {description}", k=2)
+        
+        for result in arch_results:
+            if 'architecture' in result.get('tags', []):
+                # Extract relevant patterns
+                content = result.get('content', '')
+                
+                # Determine which architecture fits
+                if 'simple' in description.lower() or 'basic' in description.lower():
+                    if 'MVC' in content:
+                        guidance.append("Use simple MVC pattern for this basic app")
+                elif 'complex' in description.lower() or 'advanced' in description.lower():
+                    if 'MVVM' in content:
+                        guidance.append("Use MVVM pattern with ViewModels for complex state management")
+                    if 'Coordinator' in content:
+                        guidance.append("Consider Coordinator pattern for complex navigation")
+                
+                # Add best practices
+                if 'best-practices' in result.get('tags', []):
+                    solutions = result.get('solutions', [])
+                    guidance.extend(solutions[:2])  # Add top 2 solutions
+        
+        return "\n".join(guidance) if guidance else ""
