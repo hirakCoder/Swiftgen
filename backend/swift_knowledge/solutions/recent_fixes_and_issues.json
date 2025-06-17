@@ -1,0 +1,24 @@
+{
+  "title": "Recent SwiftGen Fixes and Common Integration Issues",
+  "content": "RECENT FIXES AND INTEGRATION ISSUES (2024-2025)\n\n1. OPENAI API v1.0+ COMPATIBILITY:\n\nERROR: You tried to access openai.ChatCompletion, but this is no longer supported in openai>=1.0.0\nCAUSE: OpenAI Python library updated to v1.0+ with breaking changes\nSOLUTION:\n# OLD (pre v1.0)\nimport openai\nresponse = openai.ChatCompletion.create(\n    model=\"gpt-4\",\n    messages=[...]\n)\n\n# NEW (v1.0+)\nfrom openai import OpenAI\nclient = OpenAI(api_key=\"...\")\nresponse = client.chat.completions.create(\n    model=\"gpt-4\",\n    messages=[...]\n)\n\n2. SWIFTUI LIST BACKGROUND COLORS:\n\nISSUE: Background color not visible on List items\nCAUSE: .background() doesn't work on List rows\nSOLUTION:\n// WRONG - Won't show color\nList(items) { item in\n    ItemRow(item: item)\n        .background(Color.red)\n}\n\n// CORRECT - Use listRowBackground\nList(items) { item in\n    ItemRow(item: item)\n        .listRowBackground(Color.red)\n}\n\n// For dynamic colors based on data\nList(categories) { category in\n    CategoryRow(category: category)\n        .listRowBackground(category.color)\n}\n\n3. REQUEST ROUTING MISCLASSIFICATION:\n\nISSUE: App creation requests classified as 'bug_fix'\nCAUSE: Overly aggressive pattern matching\nSOLUTION:\n- Check for creation keywords first (create, build, make, develop)\n- Only classify as bug_fix if NOT a creation request\n- Improved keyword lists for accurate classification\n\n4. MULTI-LLM PROVIDER NAME MAPPING:\n\nISSUE: KeyError when using provider names\nCAUSE: Mismatch between display names and provider IDs\nCORRECT MAPPING:\n- 'claude' -> 'anthropic'\n- 'gpt4' -> 'openai'\n- 'xai' -> 'xai'\n\n5. SWIFTUI COLOR MODIFICATIONS:\n\nCOMMON COLOR ISSUES AND SOLUTIONS:\n\na) List row colors:\n   .listRowBackground(Color.blue)\n\nb) Navigation bar colors:\n   .toolbarBackground(Color.purple, for: .navigationBar)\n   .toolbarColorScheme(.dark, for: .navigationBar)\n\nc) Tab bar colors:\n   .toolbarBackground(Color.gray, for: .tabBar)\n\nd) Dynamic colors:\n   @State private var backgroundColor = Color.white\n   .background(backgroundColor)\n\ne) Color in dark mode:\n   Color(\"CustomColor\") // Use Asset Catalog\n   Color(.systemBackground) // System colors\n\n6. XAI INTEGRATION FALLBACK:\n\nISSUE: xAI not implemented, causing crashes\nSOLUTION: Graceful fallback to available LLMs\nif provider == \"xai\" and not implemented:\n    fallback_to_claude()\n\n7. REQUEST TYPE CLASSIFICATION:\n\nIMPROVED CLASSIFICATION RULES:\n- \"Create/Build/Make\" + app type -> ARCHITECTURE\n- \"Add color/theme/style\" -> UI_DESIGN\n- \"Fix/Resolve/Crash\" -> BUG_FIX\n- \"Add search functionality\" -> SIMPLE_MODIFICATION (not ALGORITHM)\n- \"Implement search algorithm\" -> ALGORITHM\n- \"Create tab bar\" -> NAVIGATION\n- \"Make text larger\" -> UI_DESIGN\n\n8. SWIFTUI MODIFIERS FOR UI CHANGES:\n\nTEXT SIZE:\n.font(.system(size: 20))\n.font(.largeTitle)\n.dynamicTypeSize(.large ... .accessibility5)\n\nCOLORS:\n.foregroundStyle(Color.red) // iOS 15+\n.background(Color.blue)\n.tint(Color.green) // iOS 15+\n\nDARK MODE:\n.preferredColorScheme(.dark)\n.environment(\\.colorScheme, .dark)\n\n9. NAVIGATION PATTERNS:\n\nTAB BAR:\nTabView {\n    View1().tabItem { Label(\"Home\", systemImage: \"house\") }\n    View2().tabItem { Label(\"Settings\", systemImage: \"gear\") }\n}\n\nNAVIGATION:\nNavigationStack { // iOS 16+\n    NavigationLink(\"Details\", destination: DetailView())\n}\n\n10. COMMON MODIFICATION PATTERNS:\n\nADD BUTTON:\nButton(action: { /* action */ }) {\n    Label(\"Delete\", systemImage: \"trash\")\n}\n.foregroundStyle(.red)\n\nADD CATEGORIES:\n@State private var categories: [Category] = []\nPicker(\"Category\", selection: $selectedCategory) {\n    ForEach(categories) { category in\n        Text(category.name).tag(category)\n    }\n}",
+  "tags": [
+    "openai-api", 
+    "swiftui-colors", 
+    "list-background", 
+    "multi-llm", 
+    "routing", 
+    "modifications",
+    "ui-design",
+    "bug-fixes",
+    "recent-issues",
+    "2024-2025"
+  ],
+  "severity": "critical",
+  "solutions": [
+    "Update OpenAI client to v1.0+ syntax",
+    "Use .listRowBackground() for List item colors",
+    "Check creation keywords before bug classification",
+    "Map provider names correctly (claude->anthropic)",
+    "Implement graceful fallbacks for unavailable LLMs"
+  ]
+}

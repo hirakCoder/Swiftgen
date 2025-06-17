@@ -1,0 +1,22 @@
+{
+  "title": "Multi-LLM Strategy Patterns and Best Practices",
+  "content": "MULTI-LLM ARCHITECTURE PATTERNS\n\n1. INTELLIGENT REQUEST ROUTING:\n\nPATTERN: Route by Request Type\n- UI/UX Design -> xAI (fast, good at visual)\n- Algorithms/Logic -> GPT-4 (strong reasoning)\n- Architecture/Complex -> Claude (context understanding)\n- Bug Fixes -> GPT-4 (debugging expertise)\n\nIMPLEMENTATION:\n```python\ndef route_request(description, available_providers):\n    request_type = analyze_request(description)\n    \n    routing_map = {\n        'ui_design': 'xai',\n        'algorithm': 'openai',\n        'architecture': 'anthropic',\n        'bug_fix': 'openai'\n    }\n    \n    selected = routing_map.get(request_type)\n    \n    # Fallback if not available\n    if selected not in available_providers:\n        return available_providers[0]\n    \n    return selected\n```\n\n2. FALLBACK STRATEGIES:\n\nPATTERN: Intelligent Fallback Chains\nInstead of random retry, use strategic fallbacks:\n\nUI Design Chain:\n1. xAI (standard approach)\n2. Claude (step-by-step with examples)\n3. GPT-4 (component-based approach)\n\nAlgorithm Chain:\n1. GPT-4 (standard implementation)\n2. Claude (explain then implement)\n3. GPT-4 (alternative algorithm)\n\n3. SPECIALIZED PROMPTING:\n\nPATTERN: LLM-Specific Instructions\n\nFOR CLAUDE:\n- Step-by-step breakdowns\n- Emphasis on context\n- Detailed explanations\n\nFOR GPT-4:\n- Component-based thinking\n- Systematic approaches\n- Algorithm optimization\n\nFOR xAI:\n- Direct, simple instructions\n- Focus on UI/visual elements\n- Quick modifications\n\n4. ERROR RECOVERY PATTERNS:\n\nPATTERN: Provider-Specific Error Handling\n\n```python\nif error_type == 'rate_limit':\n    switch_to_next_provider()\nelif error_type == 'context_length':\n    split_request_or_summarize()\nelif error_type == 'api_error':\n    retry_with_exponential_backoff()\n```\n\n5. COST OPTIMIZATION:\n\nPATTERN: Route by Cost/Performance\n\nSimple Tasks -> Cheapest LLM (xAI)\nComplex Tasks -> Best LLM (Claude/GPT-4)\nTime-Critical -> Fastest LLM\n\n6. REQUEST CLASSIFICATION:\n\nKEYWORDS FOR ROUTING:\n\nUI/DESIGN:\n- color, theme, style, layout, design\n- background, animation, visual, appearance\n- button, view, screen, interface\n- dark mode, light mode, text size\n\nALGORITHM:\n- algorithm, sort, search, calculate\n- optimize, performance, efficiency\n- implement [data structure]\n\nARCHITECTURE:\n- create, build, develop, design\n- app, application, system\n- structure, pattern, architecture\n\nBUG_FIX:\n- fix, bug, error, crash, issue\n- resolve, repair, broken, fail\n- memory leak, exception\n\n7. STATE PRESERVATION:\n\nPATTERN: Maintain Context Across LLMs\n\n```python\n# Always pass same context to any LLM\ncontext = {\n    'app_name': app_name,\n    'bundle_id': bundle_id,\n    'files': current_files,\n    'modification_history': modifications\n}\n\n# Each LLM gets identical context\nresult = llm.generate(prompt, context)\n```\n\n8. SUCCESS TRACKING:\n\nPATTERN: Learn from Results\n\n```python\nsuccess_rates = {\n    'anthropic': {'ui_design': 0.75, 'algorithm': 0.75},\n    'openai': {'ui_design': 0.70, 'algorithm': 0.90},\n    'xai': {'ui_design': 0.88, 'algorithm': 0.78}\n}\n\n# Update based on results\ndef update_success_rate(provider, request_type, success):\n    rate = success_rates[provider][request_type]\n    new_rate = rate * 0.9 + (1.0 if success else 0.0) * 0.1\n    success_rates[provider][request_type] = new_rate\n```\n\n9. TESTING STRATEGIES:\n\nPATTERN: Test All Paths\n\n- Test each LLM individually\n- Test fallback chains\n- Test with limited providers\n- Test error scenarios\n- Test cost tracking\n\n10. MONITORING:\n\nPATTERN: Track Performance Metrics\n\n- Response time per LLM\n- Success rate per request type\n- Cost per request\n- Fallback frequency\n- Error patterns",
+  "tags": [
+    "multi-llm",
+    "routing",
+    "strategies",
+    "patterns",
+    "best-practices",
+    "architecture",
+    "fallback",
+    "optimization"
+  ],
+  "severity": "important",
+  "solutions": [
+    "Route requests based on LLM strengths",
+    "Implement intelligent fallback chains",
+    "Use LLM-specific prompting strategies",
+    "Track and learn from success rates",
+    "Preserve app state across LLM switches"
+  ]
+}
