@@ -758,36 +758,66 @@
 
                     // Add assistant response with rich details
                     if (result.status === 'success') {
-                        // Show detailed success info from the API response
-                        let detailMessage = `🎉 I've successfully created **${result.app_name}**!\n\n`;
+                        // Check if this is a modification or creation
+                        const isModification = result.modification_summary || result.changes_made || result.modified_by_llm;
                         
-                        if (result.features && result.features.length > 0) {
-                            detailMessage += `✨ **Features implemented:**\n`;
-                            result.features.forEach(feature => {
-                                detailMessage += `• ${feature}\n`;
-                            });
-                            detailMessage += '\n';
+                        if (isModification) {
+                            // Show modification success message
+                            let detailMessage = `✅ I've successfully modified **${result.app_name}**!\n\n`;
+                            
+                            if (result.changes_made && Array.isArray(result.changes_made) && result.changes_made.length > 0) {
+                                detailMessage += `📝 **Changes Applied:**\n`;
+                                result.changes_made.forEach(change => {
+                                    detailMessage += `• ${change}\n`;
+                                });
+                                detailMessage += '\n';
+                            } else if (result.modification_summary) {
+                                detailMessage += `📝 **Modification:** ${result.modification_summary}\n\n`;
+                            }
+                            
+                            detailMessage += `📁 **Updated ${result.files.length} files**\n`;
+                            detailMessage += `🤖 **Modified by:** ${result.modified_by_llm || 'AI'}\n`;
+                            detailMessage += `\n🔨 The app is rebuilding and will relaunch in the simulator...`;
+                            
+                            this.addMessage('assistant', detailMessage);
+                        } else {
+                            // Show creation success message
+                            let detailMessage = `🎉 I've successfully created **${result.app_name}**!\n\n`;
+                            
+                            if (result.features && result.features.length > 0) {
+                                detailMessage += `✨ **Features implemented:**\n`;
+                                result.features.forEach(feature => {
+                                    detailMessage += `• ${feature}\n`;
+                                });
+                                detailMessage += '\n';
+                            }
+                            
+                            if (result.unique_aspects) {
+                                detailMessage += `🎨 **What makes this unique:** ${result.unique_aspects}\n\n`;
+                            }
+                            
+                            detailMessage += `📁 **Generated ${result.files.length} Swift files**\n`;
+                            detailMessage += `🤖 **Powered by:** ${result.generated_by_llm || 'AI'}\n`;
+                            
+                            if (result.quality_score) {
+                                detailMessage += `📊 **Quality Score:** ${result.quality_score}%\n`;
+                            }
+                            
+                            detailMessage += `\n🔨 The app is now building and will launch in the simulator...`;
+                            
+                            this.addMessage('assistant', detailMessage);
                         }
                         
-                        if (result.unique_aspects) {
-                            detailMessage += `🎨 **What makes this unique:** ${result.unique_aspects}\n\n`;
-                        }
-                        
-                        detailMessage += `📁 **Generated ${result.files.length} Swift files**\n`;
-                        detailMessage += `🤖 **Powered by:** ${result.generated_by_llm || 'AI'}\n`;
-                        
-                        if (result.quality_score) {
-                            detailMessage += `📊 **Quality Score:** ${result.quality_score}%\n`;
-                        }
-                        
-                        detailMessage += `\n🔨 The app is now building and will launch in the simulator...`;
-                        
-                        this.addMessage('assistant', detailMessage);
                         this.displayGeneratedCode(result.files);
                     } else if (result.files && result.files.length > 0) {
                         // Fallback for partial success
                         const fileCount = result.files.length;
-                        this.addMessage('assistant', `I've generated your ${result.app_name || 'iOS app'} with ${fileCount} Swift files. The app is now building...`);
+                        const isModification = result.modification_summary || result.changes_made || result.modified_by_llm;
+                        if (isModification) {
+                            this.addMessage('assistant', `I've modified your ${result.app_name || 'iOS app'} updating ${fileCount} files. The app is rebuilding...`);
+                        } else {
+                            this.addMessage('assistant', `I've generated your ${result.app_name || 'iOS app'} with ${fileCount} Swift files. The app is now building...`);
+                        }
                         this.displayGeneratedCode(result.files);
                     }
                 } else {
