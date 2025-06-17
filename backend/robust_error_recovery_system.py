@@ -88,6 +88,18 @@ class RobustErrorRecoverySystem:
                     "Use NavigationView instead of NavigationStack for simple cases"
                 ]
             },
+            "immutable_variable": {
+                "patterns": [
+                    "cannot assign to value.*is immutable",
+                    "cannot assign to value: 'error' is immutable",
+                    "immutable value 'error'"
+                ],
+                "fixes": [
+                    "In catch blocks, rename the caught error: catch let caughtError",
+                    "Use self.error instead of error when assigning to properties",
+                    "Rename local variables that conflict with property names"
+                ]
+            },
             "string_literal": {
                 "patterns": [
                     "unterminated string literal",
@@ -270,6 +282,8 @@ class RobustErrorRecoverySystem:
                 error_types.append("missing_type_error")
             elif "switch must be exhaustive" in error:
                 error_types.append("exhaustive_switch_error")
+            elif "cannot assign to value" in error and "is immutable" in error:
+                error_types.append("immutable_variable_error")
             else:
                 # Use first 20 chars of error as type
                 error_types.append(error[:20].replace(" ", "_"))
@@ -288,6 +302,7 @@ class RobustErrorRecoverySystem:
             "type_not_found_errors": [],
             "protocol_conformance_errors": [],
             "persistence_controller_errors": [],
+            "immutable_variable_errors": [],
             "other_errors": []
         }
 
@@ -314,6 +329,8 @@ class RobustErrorRecoverySystem:
                             analysis["protocol_conformance_errors"].append(error)
                         elif error_type == "persistence_controller":
                             analysis["persistence_controller_errors"].append(error)
+                        elif error_type == "immutable_variable":
+                            analysis["immutable_variable_errors"].append(error)
                         categorized = True
                         break
                 if categorized:
@@ -341,10 +358,14 @@ class RobustErrorRecoverySystem:
         # Check for module import errors
         has_module_error = any("no such module" in error for error in errors)
         
+        # Check for immutable variable errors
+        has_immutable_error = any("cannot assign to value" in error and "is immutable" in error for error in errors)
+        
         if not (error_analysis.get("string_literal_errors") or 
                 error_analysis.get("syntax_errors") or 
                 has_persistence_error or 
                 has_codable_error or
+                has_immutable_error or
                 has_ios_version_error or
                 has_module_error):
             return False, swift_files
@@ -478,6 +499,38 @@ class RobustErrorRecoverySystem:
                     
                     changes_made = True
 
+            # Fix immutable variable errors
+            if has_immutable_error:
+                # Fix catch block error assignment conflicts
+                # Pattern: } catch { error = ... }
+                # This happens when there's a property named 'error' and catch block also has 'error'
+                
+                # Fix 1: Rename the catch parameter
+                content = re.sub(
+                    r'(\s+)catch\s*\{\s*\n(\s+)error\s*=',
+                    r'\1catch let caughtError {\n\2self.error =',
+                    content
+                )
+                
+                # Fix 2: If error assignment uses the catch error
+                content = re.sub(
+                    r'catch\s*\{\s*\n(\s+)error\s*=\s*error',
+                    r'catch let caughtError {\n\1self.error = caughtError',
+                    content
+                )
+                
+                # Fix 3: Generic pattern for any catch block with error assignment
+                content = re.sub(
+                    r'catch\s*\{\s*\n([\s\S]*?)error\s*=\s*error',
+                    r'catch let caughtError {\n\1self.error = caughtError',
+                    content,
+                    flags=re.MULTILINE
+                )
+                
+                if content != original_content:
+                    changes_made = True
+                    self.logger.info(f"Fixed immutable error assignment in {file['path']}")
+            
             # Fix string literal errors
             if error_analysis.get("string_literal_errors"):
                 # Fix line by line for better control
