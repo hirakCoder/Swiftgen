@@ -108,6 +108,15 @@ class BuildService:
         self.error_recovery_system = None
         self.claude_service = None
         self.user_friendly_handler = UserFriendlyErrorHandler() if UserFriendlyErrorHandler else None
+        
+        # Initialize RAG knowledge base
+        self.rag_kb = None
+        try:
+            from rag_knowledge_base import RAGKnowledgeBase
+            self.rag_kb = RAGKnowledgeBase()
+            print("✓ RAG Knowledge Base initialized for build service")
+        except Exception as e:
+            print(f"⚠️ RAG Knowledge Base not available: {e}")
 
         try:
             if RobustErrorRecoverySystem:
@@ -121,9 +130,10 @@ class BuildService:
                     self.error_recovery_system = RobustErrorRecoverySystem(
                         claude_service=self.claude_service,
                         openai_key=os.getenv("OPENAI_API_KEY"),
-                        xai_key=os.getenv("XAI_API_KEY")
+                        xai_key=os.getenv("XAI_API_KEY"),
+                        rag_kb=self.rag_kb  # Pass RAG to error recovery
                     )
-                    print("✓ Robust error recovery system initialized")
+                    print("✓ Robust error recovery system initialized with RAG support")
                 else:
                     print("⚠️ Claude service not available - error recovery limited")
             else:

@@ -30,11 +30,12 @@ except ImportError:
 class RobustErrorRecoverySystem:
     """Multi-model error recovery system for Swift build errors"""
 
-    def __init__(self, claude_service=None, openai_key=None, xai_key=None):
-        """Initialize with multiple AI services"""
+    def __init__(self, claude_service=None, openai_key=None, xai_key=None, rag_kb=None):
+        """Initialize with multiple AI services and RAG knowledge base"""
         self.claude_service = claude_service
         self.openai_key = openai_key
         self.xai_key = xai_key
+        self.rag_kb = rag_kb  # RAG Knowledge Base
 
         # Set up logging
         logging.basicConfig(level=logging.INFO)
@@ -181,6 +182,7 @@ class RobustErrorRecoverySystem:
             self._pattern_based_recovery,
             self._swift_syntax_recovery,
             self._dependency_recovery,
+            self._rag_based_recovery,  # Add RAG recovery before LLM
             self._llm_based_recovery
         ]
 
@@ -230,6 +232,11 @@ class RobustErrorRecoverySystem:
                         # Pattern-based fixes might be partial, so we need AI recovery as well
                         if strategy.__name__ != "_llm_based_recovery":
                             continue
+                    
+                    elif strategy.__name__ == "_rag_based_recovery":
+                        cumulative_fixes.append("Applied RAG knowledge-based fixes")
+                        # Continue to try other strategies too
+                        continue
                             
                     elif strategy.__name__ == "_llm_based_recovery":
                         cumulative_fixes.append("Applied AI-powered fixes")
@@ -651,6 +658,157 @@ class RobustErrorRecoverySystem:
             })
 
         return changes_made, modified_files
+
+    async def _rag_based_recovery(self, errors: List[str], swift_files: List[Dict],
+                                  error_analysis: Dict) -> Tuple[bool, List[Dict]]:
+        """Use RAG knowledge base to fix errors before resorting to LLMs"""
+        
+        if not self.rag_kb:
+            self.logger.info("RAG knowledge base not available, skipping")
+            return False, swift_files
+            
+        self.logger.info("Attempting RAG-based recovery")
+        changes_made = False
+        modified_files = []
+        
+        # Process each file
+        for file in swift_files:
+            content = file["content"]
+            file_path = file["path"]
+            original_content = content
+            
+            # Query RAG for each error type
+            error_contexts = []
+            
+            # Get solutions for specific errors
+            for error in errors[:10]:  # Limit to first 10 errors
+                # Query RAG for this specific error
+                solutions = self.rag_kb.search(error, k=3)
+                
+                for solution in solutions:
+                    if solution.get('severity') in ['critical', 'important']:
+                        error_contexts.append({
+                            'error': error,
+                            'solution': solution,
+                            'quick_fixes': solution.get('quick_fixes', {})
+                        })
+            
+            # Apply quick fixes from RAG
+            for context in error_contexts:
+                quick_fixes = context['solution'].get('quick_fixes', {})
+                
+                # Apply quick string replacements
+                for old_pattern, new_pattern in quick_fixes.items():
+                    if old_pattern in content:
+                        content = content.replace(old_pattern, new_pattern)
+                        self.logger.info(f"RAG: Applied quick fix: {old_pattern} -> {new_pattern}")
+                        changes_made = True
+            
+            # Apply pattern-based fixes from RAG solutions
+            for error_type, error_list in error_analysis.items():
+                if error_list:
+                    # Query RAG for this error type
+                    pattern_solutions = self.rag_kb.search(error_type.replace('_', ' '), k=2)
+                    
+                    for solution in pattern_solutions:
+                        # Apply solutions based on RAG recommendations
+                        if error_type == "ios_version_errors":
+                            # Apply iOS version fixes from RAG
+                            content = self._apply_rag_ios_fixes(content, solution)
+                        elif error_type == "string_literal_errors":
+                            # Apply string literal fixes from RAG
+                            content = self._apply_rag_string_fixes(content, solution)
+                        elif error_type == "missing_imports":
+                            # Apply import fixes from RAG
+                            content = self._apply_rag_import_fixes(content, solution)
+            
+            # Check for reserved type conflicts using RAG
+            reserved_types = ['Task', 'State', 'Action', 'Result', 'Error']
+            for reserved_type in reserved_types:
+                if f"struct {reserved_type}" in content or f"class {reserved_type}" in content:
+                    # Get alternatives from RAG
+                    alternatives = self.rag_kb.get_naming_alternatives(reserved_type)
+                    if alternatives:
+                        replacement = alternatives[0]  # Use first alternative
+                        content = content.replace(f"struct {reserved_type}", f"struct {replacement}")
+                        content = content.replace(f"class {reserved_type}", f"class {replacement}")
+                        # Also replace usage
+                        content = re.sub(f'\\b{reserved_type}\\b(?!<)', replacement, content)
+                        self.logger.info(f"RAG: Replaced reserved type {reserved_type} with {replacement}")
+                        changes_made = True
+            
+            if content != original_content:
+                modified_files.append({
+                    "path": file_path,
+                    "content": content
+                })
+            else:
+                modified_files.append(file)
+        
+        # Store successful fixes back to RAG
+        if changes_made:
+            # Create a summary of what was fixed
+            fix_summary = f"Fixed {len(errors)} errors using RAG patterns"
+            self.rag_kb.add_learned_solution(
+                error="; ".join(errors[:3]),
+                solution=fix_summary,
+                success=True
+            )
+        
+        return changes_made, modified_files
+    
+    def _apply_rag_ios_fixes(self, content: str, solution: Dict) -> str:
+        """Apply iOS version fixes based on RAG solution"""
+        # Remove iOS 17+ features based on RAG recommendations
+        ios17_patterns = {
+            r'\.symbolEffect\([^)]*\)': '',
+            r'\.contentTransition\([^)]*\)': '',
+            r'\.scrollBounceBehavior\([^)]*\)': '',
+            r'@Observable\s+': '',
+            r'\.bounce\b': '.animation(.spring())'
+        }
+        
+        for pattern, replacement in ios17_patterns.items():
+            content = re.sub(pattern, replacement, content)
+        
+        return content
+    
+    def _apply_rag_string_fixes(self, content: str, solution: Dict) -> str:
+        """Apply string literal fixes based on RAG solution"""
+        # Fix single quotes to double quotes
+        lines = content.split('\n')
+        fixed_lines = []
+        
+        for line in lines:
+            # Skip comments
+            if not line.strip().startswith('//'):
+                # Replace single quotes with double quotes for string literals
+                line = re.sub(r"'([^']*)'", r'"\1"', line)
+            fixed_lines.append(line)
+        
+        return '\n'.join(fixed_lines)
+    
+    def _apply_rag_import_fixes(self, content: str, solution: Dict) -> str:
+        """Apply import fixes based on RAG solution"""
+        # Check what imports are needed
+        needs_swiftui = any(keyword in content for keyword in [
+            'View', 'Text', 'Button', '@State', '@Binding', 'VStack', 'HStack'
+        ])
+        needs_foundation = any(keyword in content for keyword in [
+            'UUID', 'Date', 'URL', 'Data'
+        ])
+        
+        # Add missing imports at the beginning
+        imports_to_add = []
+        if needs_swiftui and 'import SwiftUI' not in content:
+            imports_to_add.append('import SwiftUI')
+        if needs_foundation and 'import Foundation' not in content:
+            imports_to_add.append('import Foundation')
+        
+        if imports_to_add:
+            content = '\n'.join(imports_to_add) + '\n\n' + content
+        
+        return content
 
     async def _llm_based_recovery(self, errors: List[str], swift_files: List[Dict],
                                   error_analysis: Dict) -> Tuple[bool, List[Dict]]:
