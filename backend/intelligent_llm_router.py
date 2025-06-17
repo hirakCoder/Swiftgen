@@ -80,25 +80,41 @@ class IntelligentLLMRouter:
         """Analyze request to determine its type"""
         desc_lower = description.lower()
         
+        # Debug logging
+        logger.info(f"Analyzing request: {description}")
+        logger.info(f"Modification history present: {modification_history is not None}")
+        
         # Check if this is app creation (not modification)
         creation_keywords = ['create', 'build', 'make', 'develop', 'design a', 'design an']
         is_creation = any(keyword in desc_lower for keyword in creation_keywords)
+        logger.info(f"Is creation request: {is_creation}")
         
-        # Count keyword matches
-        ui_score = sum(1 for keyword in self.ui_keywords if keyword in desc_lower)
-        algo_score = sum(1 for keyword in self.algorithm_keywords if keyword in desc_lower)
-        data_score = sum(1 for keyword in self.data_keywords if keyword in desc_lower)
+        # For app creation, return ARCHITECTURE immediately
+        # But only if it's actually creating an app, not just a component
+        app_keywords = ['app', 'application', 'ios app', 'swift app']
+        is_app_creation = is_creation and any(keyword in desc_lower for keyword in app_keywords)
+        logger.info(f"Is app creation: {is_app_creation}")
+        
+        if is_app_creation and not modification_history:
+            logger.info("Returning ARCHITECTURE for app creation")
+            return RequestType.ARCHITECTURE
+        
+        # Count keyword matches - use word boundaries to avoid partial matches
+        ui_score = sum(1 for keyword in self.ui_keywords if re.search(r'\b' + re.escape(keyword) + r'\b', desc_lower))
+        algo_score = sum(1 for keyword in self.algorithm_keywords if re.search(r'\b' + re.escape(keyword) + r'\b', desc_lower))
+        data_score = sum(1 for keyword in self.data_keywords if re.search(r'\b' + re.escape(keyword) + r'\b', desc_lower))
         
         # Check for specific patterns - but only for modifications, not creation
         if not is_creation:
             # Use keyword list for more accurate bug detection
-            bug_score = sum(1 for keyword in self.bug_keywords if keyword in desc_lower)
+            bug_score = sum(1 for keyword in self.bug_keywords if re.search(r'\b' + re.escape(keyword) + r'\b', desc_lower))
             if bug_score > 0:
                 return RequestType.BUG_FIX
-        
-        # Check for navigation patterns
-        if re.search(r'(navigate|navigation|screen|page|route|tab bar|tabs)', desc_lower):
-            return RequestType.NAVIGATION
+            
+            # Check for navigation patterns only for modifications
+            if re.search(r'(navigate|navigation|screen|page|route|tab bar|tabs)', desc_lower):
+                logger.info("Returning NAVIGATION based on pattern match")
+                return RequestType.NAVIGATION
         
         # Special case: "add search" is usually a feature, not algorithm
         if 'add search' in desc_lower and 'algorithm' not in desc_lower:
@@ -114,12 +130,10 @@ class IntelligentLLMRouter:
         
         # Check modification complexity
         if modification_history and len(modification_history) > 2:
+            logger.info("Returning COMPLEX_MODIFICATION")
             return RequestType.COMPLEX_MODIFICATION
         
-        # For app creation, default to ARCHITECTURE
-        if is_creation:
-            return RequestType.ARCHITECTURE
-        
+        logger.info(f"Returning SIMPLE_MODIFICATION (ui_score={ui_score}, algo_score={algo_score}, data_score={data_score})")
         return RequestType.SIMPLE_MODIFICATION
     
     def route_initial_request(self, description: str, app_type: str = None, available_providers: List[str] = None) -> str:

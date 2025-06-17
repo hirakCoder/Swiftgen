@@ -125,6 +125,18 @@ class RobustErrorRecoverySystem:
                     "Remove .environment(\\.managedObjectContext) modifier"
                 ]
             },
+            "immutable_variable": {
+                "patterns": [
+                    "cannot assign to value.*is immutable",
+                    "cannot assign to value: 'error' is immutable",
+                    "immutable value 'error'"
+                ],
+                "fixes": [
+                    "In catch blocks, rename the caught error: catch let caughtError",
+                    "Use self.error instead of error when assigning to properties",
+                    "Rename local variables that conflict with property names"
+                ]
+            },
             "missing_import": {
                 "patterns": [
                     "cannot find type .* in scope",
