@@ -55,17 +55,25 @@ class IntelligentLLMRouter:
         self.ui_keywords = [
             'color', 'background', 'animation', 'layout', 'design', 'theme',
             'style', 'appearance', 'visual', 'look', 'ui', 'ux', 'interface',
-            'button', 'view', 'screen', 'display', 'shade', 'gradient'
+            'button', 'view', 'screen', 'display', 'shade', 'gradient',
+            'text', 'font', 'size', 'larger', 'smaller', 'dark mode', 'light mode',
+            'tab', 'tab bar', 'navigation bar', 'toolbar'
         ]
         
         self.algorithm_keywords = [
             'algorithm', 'sort', 'search', 'calculate', 'compute', 'process',
-            'optimize', 'performance', 'efficiency', 'logic', 'function'
+            'optimize', 'performance', 'efficiency', 'logic', 'function',
+            'implement'
         ]
         
         self.data_keywords = [
             'model', 'data', 'database', 'storage', 'cache', 'persist',
             'save', 'load', 'fetch', 'api', 'network'
+        ]
+        
+        self.bug_keywords = [
+            'fix', 'bug', 'error', 'crash', 'issue', 'problem',
+            'resolve', 'repair', 'broken', 'fail', 'memory leak', 'leak'
         ]
     
     def analyze_request(self, description: str, modification_history: List[Dict] = None) -> RequestType:
@@ -82,11 +90,19 @@ class IntelligentLLMRouter:
         data_score = sum(1 for keyword in self.data_keywords if keyword in desc_lower)
         
         # Check for specific patterns - but only for modifications, not creation
-        if not is_creation and re.search(r'(fix|bug|error|crash|issue)', desc_lower):
-            return RequestType.BUG_FIX
+        if not is_creation:
+            # Use keyword list for more accurate bug detection
+            bug_score = sum(1 for keyword in self.bug_keywords if keyword in desc_lower)
+            if bug_score > 0:
+                return RequestType.BUG_FIX
         
-        if re.search(r'(navigate|navigation|screen|page|route)', desc_lower):
+        # Check for navigation patterns
+        if re.search(r'(navigate|navigation|screen|page|route|tab bar|tabs)', desc_lower):
             return RequestType.NAVIGATION
+        
+        # Special case: "add search" is usually a feature, not algorithm
+        if 'add search' in desc_lower and 'algorithm' not in desc_lower:
+            return RequestType.SIMPLE_MODIFICATION
         
         # Determine primary type based on scores
         if ui_score > algo_score and ui_score > data_score:
