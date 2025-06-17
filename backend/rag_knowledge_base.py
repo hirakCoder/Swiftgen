@@ -40,6 +40,22 @@ class RAGKnowledgeBase:
         self.index_path = os.path.join(knowledge_dir, "faiss_index.pkl")
         self.metadata_path = os.path.join(knowledge_dir, "metadata.pkl")
         
+        # Initialize cache manager for performance
+        try:
+            from rag_cache_manager import RAGCacheManager, COMMON_QUERIES
+            self.cache_manager = RAGCacheManager(max_cache_size=1000, ttl_seconds=3600)
+            print("[RAG] Cache manager initialized")
+            
+            # Warm cache with common queries in background
+            asyncio.create_task(self._warm_cache_async(COMMON_QUERIES))
+        except Exception as e:
+            print(f"[RAG] Cache manager not available: {e}")
+            self.cache_manager = None
+        
+        # Batch update queue for performance
+        self.update_queue = []
+        self.batch_size = 10
+        
         self._initialize_index()
         self._load_knowledge_base()
         
@@ -98,6 +114,10 @@ class RAGKnowledgeBase:
         
         # Load solutions
         self._load_knowledge_from_dir(self.solutions_dir, "solution")
+        
+        # Process any remaining updates in queue
+        if self.update_queue:
+            self._process_batch_updates()
         
         print(f"[RAG] Total documents in knowledge base: {len(self.metadata)}")
         
@@ -384,29 +404,60 @@ class RAGKnowledgeBase:
         if doc_id in existing_ids:
             return
             
-        # Prepare text for embedding
-        text = f"{knowledge.get('title', '')}\n{knowledge.get('content', '')}"
-        tags = ' '.join(knowledge.get('tags', []))
-        full_text = f"{text}\n{tags}"
-        
-        # Generate embedding
-        embedding = self.model.encode([full_text])[0]
-        
-        # Add to index
-        self.index.add(np.array([embedding]))
-        
-        # Store metadata
-        metadata = {
-            'id': doc_id,
+        # Add to update queue for batch processing
+        self.update_queue.append({
+            'knowledge': knowledge,
             'category': category,
             'filename': filename,
-            'title': knowledge.get('title', ''),
-            'content': knowledge.get('content', ''),
-            'tags': knowledge.get('tags', []),
-            'severity': knowledge.get('severity', 'normal'),
-            'solutions': knowledge.get('solutions', [])
-        }
-        self.metadata.append(metadata)
+            'doc_id': doc_id
+        })
+        
+        # Process batch if queue is full
+        if len(self.update_queue) >= self.batch_size:
+            self._process_batch_updates()
+    
+    def _process_batch_updates(self):
+        """Process batch updates for better performance"""
+        if not self.update_queue:
+            return
+        
+        # Prepare all texts for batch embedding
+        texts = []
+        metadatas = []
+        
+        for update in self.update_queue:
+            knowledge = update['knowledge']
+            
+            # Prepare text for embedding
+            text = f"{knowledge.get('title', '')}\n{knowledge.get('content', '')}"
+            tags = ' '.join(knowledge.get('tags', []))
+            full_text = f"{text}\n{tags}"
+            texts.append(full_text)
+            
+            # Prepare metadata
+            metadata = {
+                'id': update['doc_id'],
+                'category': update['category'],
+                'filename': update['filename'],
+                'title': knowledge.get('title', ''),
+                'content': knowledge.get('content', ''),
+                'tags': knowledge.get('tags', []),
+                'severity': knowledge.get('severity', 'normal'),
+                'solutions': knowledge.get('solutions', [])
+            }
+            metadatas.append(metadata)
+        
+        # Batch encode all texts
+        embeddings = self.model.encode(texts)
+        
+        # Add all embeddings to index
+        self.index.add(np.array(embeddings))
+        
+        # Add all metadata
+        self.metadata.extend(metadatas)
+        
+        # Clear queue
+        self.update_queue.clear()
         
         # Save index
         self._save_index()
@@ -415,6 +466,12 @@ class RAGKnowledgeBase:
         """Search for relevant knowledge based on query"""
         if not self.metadata:
             return []
+        
+        # Check cache first
+        if self.cache_manager:
+            cached_results = self.cache_manager.get(query, k)
+            if cached_results is not None:
+                return cached_results
             
         # Generate query embedding
         query_embedding = self.model.encode([query])[0]
@@ -429,6 +486,10 @@ class RAGKnowledgeBase:
                 result = self.metadata[idx].copy()
                 result['relevance_score'] = float(1 / (1 + distances[0][len(results)]))
                 results.append(result)
+        
+        # Cache the results
+        if self.cache_manager and results:
+            self.cache_manager.put(query, k, results)
                 
         return results
         
@@ -817,3 +878,39 @@ class RAGKnowledgeBase:
                 issues["warnings"].append(f"{path}: Uses force try - should handle errors properly")
                 
         return issues
+    
+    async def _warm_cache_async(self, common_queries: List[str]):
+        """Warm the cache with common queries asynchronously"""
+        try:
+            await asyncio.sleep(1)  # Small delay to let system initialize
+            
+            print("[RAG] Starting cache warming...")
+            warmed_count = 0
+            
+            for query in common_queries:
+                for k in [3, 5]:  # Common k values
+                    # Check if already cached
+                    if self.cache_manager.get(query, k) is None:
+                        # Perform search to warm cache
+                        results = self.search(query, k)
+                        if results:
+                            warmed_count += 1
+                
+                # Small delay between queries to avoid overloading
+                await asyncio.sleep(0.1)
+            
+            print(f"[RAG] Cache warming complete. Warmed {warmed_count} queries.")
+            
+            # Print cache stats
+            if self.cache_manager:
+                stats = self.cache_manager.get_stats()
+                print(f"[RAG] Cache stats: {stats}")
+                
+        except Exception as e:
+            print(f"[RAG] Error during cache warming: {e}")
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        if self.cache_manager:
+            return self.cache_manager.get_stats()
+        return {"message": "Cache not available"}
