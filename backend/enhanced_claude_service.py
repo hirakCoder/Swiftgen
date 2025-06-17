@@ -142,7 +142,8 @@ class EnhancedClaudeService:
         
         # Use intelligent routing if available
         if self.router:
-            selected_provider = self.router.route_initial_request(description, app_type="ios")
+            available_providers = [model.provider for model in self.available_models]
+            selected_provider = self.router.route_initial_request(description, app_type="ios", available_providers=available_providers)
             if selected_provider in self.models:
                 self.current_model = self.models[selected_provider]
                 logger.info(f"[ROUTER] Selected {self.current_model.name} for app generation")
@@ -320,8 +321,18 @@ Return a JSON response with this EXACT structure:
 
     async def _generate_xai(self, system_prompt: str, user_prompt: str) -> str:
         """Generate text using xAI"""
-        # Placeholder for xAI implementation
-        raise NotImplementedError("xAI integration pending")
+        # Since xAI is not implemented, fall back to Claude
+        logger.warning("xAI not implemented, falling back to Claude")
+        
+        # Use Claude as fallback
+        if "anthropic" in self.models:
+            self.current_model = self.models["anthropic"]
+            return await self._generate_claude(system_prompt, user_prompt)
+        elif "openai" in self.models:
+            self.current_model = self.models["openai"]
+            return await self._generate_openai(system_prompt, user_prompt)
+        else:
+            raise NotImplementedError("No fallback LLM available")
 
     def generate_text(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Synchronous wrapper for compatibility"""
@@ -360,7 +371,8 @@ Return a JSON response with this EXACT structure:
         # Use intelligent routing for modifications
         if self.router:
             # Analyze modification to determine best LLM
-            selected_provider = self.router.route_initial_request(modification)
+            available_providers = [model.provider for model in self.available_models]
+            selected_provider = self.router.route_initial_request(modification, available_providers=available_providers)
             if selected_provider in self.models:
                 self.current_model = self.models[selected_provider]
                 logger.info(f"[ROUTER] Selected {self.current_model.name} for modification: {modification[:50]}...")

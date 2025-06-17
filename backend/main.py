@@ -9,7 +9,7 @@ import sys
 import json  # IMPORTANT: This is the json module import - never use 'json' as a variable name
 import re
 from datetime import datetime
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from typing import Optional, Dict, List
 from pathlib import Path
 

@@ -98,7 +98,7 @@ class IntelligentLLMRouter:
         
         return RequestType.SIMPLE_MODIFICATION
     
-    def route_initial_request(self, description: str, app_type: str = None) -> str:
+    def route_initial_request(self, description: str, app_type: str = None, available_providers: List[str] = None) -> str:
         """Route initial request to most appropriate LLM"""
         request_type = self.analyze_request(description)
         
@@ -119,8 +119,24 @@ class IntelligentLLMRouter:
         
         selected_llm = routing_map.get(request_type, "claude")
         
-        logger.info(f"Routing to: {selected_llm}")
-        return selected_llm
+        # If xAI is selected but not available, use fallback
+        if selected_llm == "xai" and available_providers:
+            if "xai" not in available_providers:
+                # xAI not available, use Claude for UI/UX as second best
+                logger.warning(f"xAI not available, falling back to Claude for {request_type.value}")
+                selected_llm = "anthropic"
+        
+        # Map provider names correctly
+        provider_map = {
+            "claude": "anthropic",
+            "gpt4": "openai",
+            "xai": "xai"
+        }
+        
+        selected_provider = provider_map.get(selected_llm, selected_llm)
+        
+        logger.info(f"Routing to: {selected_provider}")
+        return selected_provider
     
     def get_fallback_strategy(self, 
                             failed_llm: str, 
@@ -128,24 +144,22 @@ class IntelligentLLMRouter:
                             failure_count: int) -> Tuple[str, str]:
         """Get fallback LLM and strategy after failure"""
         
-        # Define fallback chains for different request types
+        # Define fallback chains for different request types (using provider names)
         fallback_chains = {
             RequestType.UI_DESIGN: [
-                ("xai", "standard approach"),
-                ("claude", "step-by-step with examples"),
-                ("gpt4", "component-based approach"),
-                ("xai", "simplified implementation")
+                ("anthropic", "standard approach"),  # Since xAI not implemented
+                ("openai", "component-based approach"),
+                ("anthropic", "step-by-step with examples")
             ],
             RequestType.ALGORITHM: [
-                ("gpt4", "standard implementation"),
-                ("claude", "explain then implement"),
-                ("gpt4", "alternative algorithm"),
-                ("xai", "basic implementation")
+                ("openai", "standard implementation"),
+                ("anthropic", "explain then implement"),
+                ("openai", "alternative algorithm")
             ],
             RequestType.SIMPLE_MODIFICATION: [
-                ("xai", "direct modification"),
-                ("claude", "contextual modification"),
-                ("gpt4", "systematic changes")
+                ("anthropic", "direct modification"),  # Since xAI not implemented
+                ("openai", "systematic changes"),
+                ("anthropic", "contextual modification")
             ]
         }
         
@@ -163,13 +177,13 @@ class IntelligentLLMRouter:
                     logger.info(f"Fallback: {failed_llm} -> {next_llm} ({next_strategy})")
                     return next_llm, next_strategy
         
-        # Default fallback
-        if failed_llm == "claude":
-            return "gpt4", "alternative approach"
-        elif failed_llm == "gpt4":
-            return "xai", "simplified approach"
+        # Default fallback - use provider names
+        if failed_llm == "anthropic":
+            return "openai", "alternative approach"
+        elif failed_llm == "openai":
+            return "anthropic", "comprehensive approach"
         else:
-            return "claude", "comprehensive rewrite"
+            return "anthropic", "comprehensive rewrite"
     
     def create_specialized_prompt(self, 
                                 llm: str, 
