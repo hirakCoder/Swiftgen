@@ -7,7 +7,6 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 import anthropic
-import openai
 import requests
 from dotenv import load_dotenv
 
@@ -66,7 +65,8 @@ class EnhancedClaudeService:
                 provider="openai",
                 api_key_env="OPENAI_API_KEY",
                 model_id="gpt-4-turbo-preview",
-                max_tokens=4096
+                max_tokens=4096,
+                temperature=0.7
             ),
             LLMModel(
                 name="xAI Grok",
@@ -303,11 +303,11 @@ Return a JSON response with this EXACT structure:
 
     async def _generate_openai(self, system_prompt: str, user_prompt: str) -> str:
         """Generate text using OpenAI"""
-        import openai
-
-        openai.api_key = self.api_keys["openai"]
-
-        response = openai.ChatCompletion.create(
+        from openai import OpenAI
+        
+        client = OpenAI(api_key=self.api_keys["openai"])
+        
+        response = client.chat.completions.create(
             model=self.current_model.model_id,
             messages=[
                 {"role": "system", "content": system_prompt},

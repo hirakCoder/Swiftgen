@@ -46,8 +46,8 @@ class IntelligentLLMRouter:
     def __init__(self):
         self.request_history = []
         self.success_rates = {
-            "claude": {"ui_design": 0.75, "algorithm": 0.75, "default": 0.80},
-            "gpt4": {"ui_design": 0.70, "algorithm": 0.90, "default": 0.82},
+            "anthropic": {"ui_design": 0.75, "algorithm": 0.75, "default": 0.80},
+            "openai": {"ui_design": 0.70, "algorithm": 0.90, "default": 0.82},
             "xai": {"ui_design": 0.88, "algorithm": 0.78, "default": 0.85}
         }
         
@@ -72,13 +72,17 @@ class IntelligentLLMRouter:
         """Analyze request to determine its type"""
         desc_lower = description.lower()
         
+        # Check if this is app creation (not modification)
+        creation_keywords = ['create', 'build', 'make', 'develop', 'design a', 'design an']
+        is_creation = any(keyword in desc_lower for keyword in creation_keywords)
+        
         # Count keyword matches
         ui_score = sum(1 for keyword in self.ui_keywords if keyword in desc_lower)
         algo_score = sum(1 for keyword in self.algorithm_keywords if keyword in desc_lower)
         data_score = sum(1 for keyword in self.data_keywords if keyword in desc_lower)
         
-        # Check for specific patterns
-        if re.search(r'(fix|bug|error|crash|issue)', desc_lower):
+        # Check for specific patterns - but only for modifications, not creation
+        if not is_creation and re.search(r'(fix|bug|error|crash|issue)', desc_lower):
             return RequestType.BUG_FIX
         
         if re.search(r'(navigate|navigation|screen|page|route)', desc_lower):
@@ -95,6 +99,10 @@ class IntelligentLLMRouter:
         # Check modification complexity
         if modification_history and len(modification_history) > 2:
             return RequestType.COMPLEX_MODIFICATION
+        
+        # For app creation, default to ARCHITECTURE
+        if is_creation:
+            return RequestType.ARCHITECTURE
         
         return RequestType.SIMPLE_MODIFICATION
     
@@ -249,7 +257,7 @@ IMPORTANT: For UI modifications, especially colors:
     
     def get_best_llm_for_type(self, request_type: RequestType) -> str:
         """Get the best performing LLM for a request type"""
-        type_key = request_type.value if request_type.value in self.success_rates["claude"] else "default"
+        type_key = request_type.value if request_type.value in self.success_rates.get("anthropic", {}) else "default"
         
         best_llm = max(
             self.success_rates.keys(),
