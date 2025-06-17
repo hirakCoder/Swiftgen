@@ -106,8 +106,12 @@ Return JSON with ALL {len(files)} files:
             return False, issues
             
         response_files = response.get('files', [])
-        if len(response_files) != len(original_files):
-            issues.append(f"Expected {len(original_files)} files, got {len(response_files)}")
+        # Allow adding new files (more files than original) but not removing files
+        if len(response_files) < len(original_files):
+            issues.append(f"Expected at least {len(original_files)} files, got {len(response_files)}")
+        elif len(response_files) > len(original_files):
+            # This is OK - new files were added (e.g., to fix missing type errors)
+            print(f"[INFO] Response includes {len(response_files) - len(original_files)} new files")
         
         # Check 2: Files have required structure
         for i, file in enumerate(response_files):
@@ -121,7 +125,15 @@ Return JSON with ALL {len(files)} files:
             elif not file['content'] or len(file['content']) < 10:
                 issues.append(f"File {file.get('path', i)} has empty or invalid content")
         
-        # Check 3: Verify files_modified matches actual changes
+        # Check 3: Ensure all original files are present
+        response_paths = {f.get('path') for f in response_files if f.get('path')}
+        original_paths = {f['path'] for f in original_files}
+        missing_files = original_paths - response_paths
+        
+        if missing_files:
+            issues.append(f"Missing original files: {', '.join(missing_files)}")
+        
+        # Check 4: Verify files_modified matches actual changes
         files_modified = response.get('files_modified', [])
         actual_modified = []
         

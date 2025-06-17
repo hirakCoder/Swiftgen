@@ -405,6 +405,8 @@ IMPORTANT RULES:
 3. Maintain the same app structure and architecture
 4. Return ALL files with their complete content (modified or unchanged)
 5. Do NOT change the app name or bundle ID
+6. If fixing "cannot find X in scope" errors, CREATE the missing file/type
+7. When creating new files, add them to the files array in your response
 
 CRITICAL iOS VERSION CONSTRAINTS:
 - Target iOS: 16.0

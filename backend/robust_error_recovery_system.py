@@ -888,7 +888,23 @@ class RobustErrorRecoverySystem:
                     fix_prompt = self._create_error_fix_prompt(errors, swift_files, error_analysis)
 
                     # Create a modification request that fixes the errors
-                    modification_request = f"Fix these build errors:\n{chr(10).join(errors[:5])}"
+                    # Check if we need to create missing files
+                    missing_views = []
+                    for error in errors:
+                        if "cannot find" in error and "View" in error and "in scope" in error:
+                            # Extract the missing view name
+                            import re
+                            match = re.search(r"cannot find '(\w+View)' in scope", error)
+                            if match:
+                                missing_views.append(match.group(1))
+                    
+                    if missing_views:
+                        modification_request = f"Fix these build errors by creating the missing SwiftUI views:\n"
+                        for view in missing_views:
+                            modification_request += f"- Create {view}.swift with a proper SwiftUI View implementation\n"
+                        modification_request += f"\nErrors:\n{chr(10).join(errors[:5])}"
+                    else:
+                        modification_request = f"Fix these build errors:\n{chr(10).join(errors[:5])}"
 
                     # Use modify_ios_app if available
                     if hasattr(self.claude_service, 'modify_ios_app'):
