@@ -46,9 +46,9 @@ class IntelligentLLMRouter:
     def __init__(self):
         self.request_history = []
         self.success_rates = {
-            "claude": {"ui_design": 0.85, "algorithm": 0.75, "default": 0.80},
+            "claude": {"ui_design": 0.75, "algorithm": 0.75, "default": 0.80},
             "gpt4": {"ui_design": 0.70, "algorithm": 0.90, "default": 0.82},
-            "xai": {"ui_design": 0.65, "algorithm": 0.78, "default": 0.75}
+            "xai": {"ui_design": 0.88, "algorithm": 0.78, "default": 0.85}
         }
         
         # Keywords for request classification
@@ -106,10 +106,10 @@ class IntelligentLLMRouter:
         
         # Route based on request type and known strengths
         routing_map = {
-            RequestType.UI_DESIGN: "claude",  # Claude excels at UI/UX
+            RequestType.UI_DESIGN: "xai",      # xAI excels at UI/UX
             RequestType.ALGORITHM: "gpt4",     # GPT-4 strong at algorithms
             RequestType.DATA_MODEL: "gpt4",    # GPT-4 good at data structures
-            RequestType.NAVIGATION: "claude",  # Claude understands navigation context
+            RequestType.NAVIGATION: "xai",     # xAI good at UI navigation
             RequestType.BUG_FIX: "gpt4",      # GPT-4 good at debugging
             RequestType.SIMPLE_MODIFICATION: "xai",  # xAI fast for simple tasks
             RequestType.COMPLEX_MODIFICATION: "claude",  # Claude handles complexity
@@ -131,9 +131,9 @@ class IntelligentLLMRouter:
         # Define fallback chains for different request types
         fallback_chains = {
             RequestType.UI_DESIGN: [
-                ("claude", "standard approach"),
-                ("gpt4", "component-based approach"),
+                ("xai", "standard approach"),
                 ("claude", "step-by-step with examples"),
+                ("gpt4", "component-based approach"),
                 ("xai", "simplified implementation")
             ],
             RequestType.ALGORITHM: [

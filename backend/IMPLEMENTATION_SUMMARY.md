@@ -24,21 +24,22 @@
 ## Key Features
 
 ### Request Analysis
-- UI/Design requests → Claude (best at SwiftUI/UX)
+- UI/Design requests → xAI (best at UI/UX)
 - Algorithm/Logic → GPT-4 (strong at algorithms)
 - Simple changes → xAI (fast and efficient)
+- Complex multi-file changes → Claude (handles complexity)
 
 ### Intelligent Fallback
 Instead of random retries, the system uses strategic fallbacks:
-- Claude fails on UI → Try GPT-4 with component-based approach
+- xAI fails on UI → Try Claude with step-by-step approach
 - GPT-4 fails on algorithm → Try Claude with explain-first approach
 - Each fallback uses a different strategy
 
 ### Specialized Prompts
 Each LLM receives tailored instructions:
-- Claude: Step-by-step with SwiftUI best practices
-- GPT-4: Component-based systematic approach
-- xAI: Simplified, direct implementation
+- xAI: Direct UI/UX implementation with SwiftUI best practices
+- Claude: Step-by-step approach for complex multi-file changes
+- GPT-4: Component-based systematic approach for algorithms
 
 ## Benefits
 

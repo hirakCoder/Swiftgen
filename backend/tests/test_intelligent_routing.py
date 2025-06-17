@@ -99,8 +99,8 @@ class TestIntelligentRouting(TestRunner):
             
             # Test UI design routing
             selected = router.route_initial_request("Add colors to the interface")
-            assert selected == "claude"
-            print("✓ UI design routed to Claude")
+            assert selected == "xai"
+            print("✓ UI design routed to xAI")
             
             # Test algorithm routing
             selected = router.route_initial_request("Implement efficient search algorithm")
@@ -128,10 +128,10 @@ class TestIntelligentRouting(TestRunner):
             router = IntelligentLLMRouter()
             
             # Test UI design fallback
-            next_llm, strategy = router.get_fallback_strategy("claude", RequestType.UI_DESIGN, 1)
-            assert next_llm == "gpt4"
-            assert "component-based" in strategy
-            print(f"✓ UI fallback: claude -> {next_llm} ({strategy})")
+            next_llm, strategy = router.get_fallback_strategy("xai", RequestType.UI_DESIGN, 1)
+            assert next_llm == "claude"
+            assert "step-by-step" in strategy
+            print(f"✓ UI fallback: xai -> {next_llm} ({strategy})")
             
             # Test algorithm fallback
             next_llm, strategy = router.get_fallback_strategy("gpt4", RequestType.ALGORITHM, 1)
@@ -237,7 +237,7 @@ class TestIntelligentRouting(TestRunner):
             
             # Test descriptions that should route to different LLMs
             test_cases = [
-                ("Create a beautiful color-coded todo list", "claude"),  # UI-focused
+                ("Create a beautiful color-coded todo list", "xai"),     # UI-focused
                 ("Implement efficient task sorting algorithm", "gpt4"),  # Algorithm-focused
                 ("Change app title", "xai")  # Simple modification
             ]

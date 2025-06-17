@@ -44,10 +44,10 @@ data_keywords = ['model', 'data', 'database', 'storage', 'cache', 'api', ...]
 
 ### Initial Routing Map
 ```python
-RequestType.UI_DESIGN → Claude (excels at UI/UX)
+RequestType.UI_DESIGN → xAI (excels at UI/UX)
 RequestType.ALGORITHM → GPT-4 (strong at algorithms)
 RequestType.DATA_MODEL → GPT-4 (good at data structures)
-RequestType.NAVIGATION → Claude (understands context)
+RequestType.NAVIGATION → xAI (good at UI navigation)
 RequestType.BUG_FIX → GPT-4 (good at debugging)
 RequestType.SIMPLE_MODIFICATION → xAI (fast for simple tasks)
 RequestType.COMPLEX_MODIFICATION → Claude (handles complexity)
@@ -58,9 +58,9 @@ RequestType.COMPLEX_MODIFICATION → Claude (handles complexity)
 When an LLM fails, the system uses intelligent fallback strategies:
 
 #### UI Design Fallback
-1. Claude (standard approach)
-2. GPT-4 (component-based approach)
-3. Claude (step-by-step with examples)
+1. xAI (standard approach)
+2. Claude (step-by-step with examples)
+3. GPT-4 (component-based approach)
 4. xAI (simplified implementation)
 
 #### Algorithm Fallback
@@ -112,9 +112,9 @@ The system continuously learns from results:
 ```python
 # Initial success rates (based on analysis)
 success_rates = {
-    "claude": {"ui_design": 0.85, "algorithm": 0.75, "default": 0.80},
+    "claude": {"ui_design": 0.75, "algorithm": 0.75, "default": 0.80},
     "gpt4": {"ui_design": 0.70, "algorithm": 0.90, "default": 0.82},
-    "xai": {"ui_design": 0.65, "algorithm": 0.78, "default": 0.75}
+    "xai": {"ui_design": 0.88, "algorithm": 0.78, "default": 0.85}
 }
 ```
 
@@ -144,7 +144,7 @@ new_rate = (current_rate * 0.9) + (success ? 1.0 : 0.0) * 0.1
 ```
 User: "Add red background color to task categories"
 → Analyzed as: UI_DESIGN
-→ Routed to: Claude
+→ Routed to: xAI
 → Strategy: Standard approach with SwiftUI-specific guidance
 → Specialized prompt includes: .listRowBackground() usage
 ```
