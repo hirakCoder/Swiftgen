@@ -273,6 +273,122 @@ async def serve_editor():
 
     return HTMLResponse(content=html_content)
 
+def _generate_next_steps_checklist(app_complexity: str, app_type: str, features: List[str]) -> str:
+    """Generate a contextual next steps checklist based on app type and features"""
+    
+    checklist = "\n\n🚀 **Next Steps to Make Your App Production-Ready:**\n"
+    
+    # Common steps for all apps
+    common_steps = [
+        "✅ Test on real devices with different screen sizes",
+        "✅ Add proper error handling and user feedback",
+        "✅ Implement app icons and launch screen",
+        "✅ Configure app permissions and privacy settings"
+    ]
+    
+    # Type-specific steps
+    type_specific_steps = {
+        "food_delivery": [
+            "🔌 **Backend Integration:**",
+            "   • Connect to restaurant API or database",
+            "   • Implement real payment processing (Stripe/Apple Pay)",
+            "   • Add order tracking with push notifications",
+            "   • Set up user authentication system",
+            "",
+            "🗄️ **Data Management:**",
+            "   • Replace mock data with real restaurant database",
+            "   • Implement persistent cart storage",
+            "   • Add user preferences and order history",
+            "",
+            "📍 **Location Services:**",
+            "   • Integrate Maps for delivery tracking",
+            "   • Add address autocomplete and validation",
+            "   • Implement delivery zone verification"
+        ],
+        "ride_sharing": [
+            "🔌 **Backend Integration:**",
+            "   • Connect to driver matching system",
+            "   • Implement real-time location tracking",
+            "   • Add payment processing integration",
+            "   • Set up rider/driver authentication",
+            "",
+            "🗺️ **Mapping & Navigation:**",
+            "   • Integrate Google Maps or MapKit",
+            "   • Add route calculation and optimization",
+            "   • Implement real-time location updates",
+            "",
+            "💬 **Communication:**",
+            "   • Add in-app messaging between riders/drivers",
+            "   • Implement push notifications for ride updates",
+            "   • Add emergency contact features"
+        ],
+        "ecommerce": [
+            "🔌 **Backend Integration:**",
+            "   • Connect to product catalog API",
+            "   • Implement secure payment gateway",
+            "   • Add inventory management system",
+            "   • Set up user accounts and profiles",
+            "",
+            "🛒 **E-commerce Features:**",
+            "   • Add product search and filtering",
+            "   • Implement wishlist functionality",
+            "   • Add order tracking and history",
+            "   • Create recommendation engine",
+            "",
+            "💳 **Payment & Security:**",
+            "   • Integrate Apple Pay and card processing",
+            "   • Add shipping calculation",
+            "   • Implement secure checkout flow"
+        ],
+        "social_media": [
+            "🔌 **Backend Integration:**",
+            "   • Set up user authentication (Firebase/Auth0)",
+            "   • Implement post/content database",
+            "   • Add real-time messaging system",
+            "   • Create notification service",
+            "",
+            "📱 **Social Features:**",
+            "   • Add photo/video upload capability",
+            "   • Implement follow/friend system",
+            "   • Create activity feed algorithm",
+            "   • Add content moderation",
+            "",
+            "🔔 **Engagement:**",
+            "   • Set up push notifications",
+            "   • Add sharing to other platforms",
+            "   • Implement analytics tracking"
+        ]
+    }
+    
+    # Add common steps
+    checklist += "\n".join(common_steps) + "\n\n"
+    
+    # Add type-specific steps
+    if app_type in type_specific_steps:
+        checklist += "\n".join(type_specific_steps[app_type]) + "\n\n"
+    else:
+        # Generic steps for other app types
+        checklist += "🔌 **Backend Integration:**\n"
+        checklist += "   • Connect to your API or database\n"
+        checklist += "   • Implement user authentication\n"
+        checklist += "   • Add data persistence\n\n"
+    
+    # Performance and quality steps
+    checklist += "🎯 **Performance & Quality:**\n"
+    checklist += "   • Add loading states and skeleton screens\n"
+    checklist += "   • Implement caching for better performance\n"
+    checklist += "   • Add analytics to track user behavior\n"
+    checklist += "   • Set up crash reporting (Firebase Crashlytics)\n\n"
+    
+    # App Store preparation
+    checklist += "📱 **App Store Preparation:**\n"
+    checklist += "   • Create compelling app screenshots\n"
+    checklist += "   • Write app description and keywords\n"
+    checklist += "   • Set up App Store Connect\n"
+    checklist += "   • Submit for TestFlight beta testing"
+    
+    return checklist
+
 def _is_complex_app(description: str) -> bool:
     """Determine if the app requires advanced architecture"""
     description_lower = description.lower()
@@ -294,7 +410,7 @@ def _is_complex_app(description: str) -> bool:
         "banking", "finance", "investment", "crypto",
         "healthcare", "medical", "fitness tracker",
         "social media", "social network",
-        "uber", "airbnb", "delivery",
+        "uber", "airbnb", "delivery", "food delivery", "door dash", "grubhub", "restaurant",
         # Technical requirements
         "mvvm", "clean architecture", "coordinator",
         "dependency injection", "unit test",
@@ -309,8 +425,8 @@ def _is_complex_app(description: str) -> bool:
     if any(phrase in description_lower for phrase in ["full app", "complete app", "all features"]):
         matches += 2
     
-    # Consider complex if 2+ indicators present
-    return matches >= 2
+    # Consider complex if 1+ indicators present (lowered threshold for better detection)
+    return matches >= 1
 
 @app.get("/api/health")
 async def health_check():
@@ -362,6 +478,25 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
         print(f"[MAIN] Description: {request.description}")
         print(f"[MAIN] Using LLM selection for optimal results")
 
+        # Send immediate status update
+        await notify_clients(project_id, {
+            "type": "status",
+            "message": f"🚀 Starting to create {app_name}...",
+            "status": "initializing"
+        })
+        
+        # Small delay to ensure WebSocket is connected
+        await asyncio.sleep(0.2)
+        
+        # Send another update to ensure UI is responsive
+        await notify_clients(project_id, {
+            "type": "status", 
+            "message": f"📋 Preparing workspace for {app_name}...",
+            "status": "initializing"
+        })
+        
+        await asyncio.sleep(0.1)
+
         # Update status with more details
         await notify_clients(project_id, {
             "type": "status",
@@ -384,25 +519,100 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
         # Detect if this is a complex app that needs advanced generation
         is_complex_app = _is_complex_app(validated_description)
         
+        # Determine complexity level for build attempts
+        app_complexity = "low"
         if is_complex_app:
+            # Send progress update during analysis
             await notify_clients(project_id, {
                 "type": "status",
-                "message": "🏗️ Architecting enterprise-grade app structure...",
-                "status": "generating"
+                "message": "🔍 Analyzing app complexity and requirements...",
+                "status": "analyzing",
+                "progress": "Determining architecture patterns needed"
+            })
+            
+            # Use architect to get detailed complexity
+            try:
+                from complex_app_architect import ComplexAppArchitect
+                architect = ComplexAppArchitect()
+                app_complexity = architect.analyze_complexity(validated_description)
+                app_type = architect.identify_app_type(validated_description)
+                
+                # Send specific progress for app type
+                type_messages = {
+                    "food_delivery": "🍕 Detected food delivery app - preparing restaurant and ordering features...",
+                    "ride_sharing": "🚗 Detected ride sharing app - setting up location and driver features...",
+                    "social_media": "📱 Detected social media app - creating feed and interaction features...",
+                    "ecommerce": "🛒 Detected e-commerce app - building product and cart features..."
+                }
+                
+                await notify_clients(project_id, {
+                    "type": "status",
+                    "message": type_messages.get(app_type, "📋 Planning app architecture..."),
+                    "status": "analyzing",
+                    "progress": f"Identified as {app_type.replace('_', ' ')} app"
+                })
+            except:
+                app_complexity = "high"  # Default to high for complex apps
+        
+        if is_complex_app:
+            complexity_messages = {
+                "high": "🏗️ Architecting enterprise-grade app structure with multiple screens and features...",
+                "medium": "🎨 Designing feature-rich app with advanced functionality...",
+                "low": "🚀 Creating optimized app structure..."
+            }
+            await notify_clients(project_id, {
+                "type": "status",
+                "message": complexity_messages.get(app_complexity, "🏗️ Architecting app structure..."),
+                "status": "generating",
+                "complexity": app_complexity
             })
         else:
             await notify_clients(project_id, {
                 "type": "status",
                 "message": "🧬 Creating unique implementation with AI...",
-                "status": "generating"
+                "status": "generating",
+                "complexity": "low"
             })
 
         # Use advanced generator for complex apps
         if is_complex_app:
+            # Send progress before generation
+            await notify_clients(project_id, {
+                "type": "status",
+                "message": "🤖 Selecting optimal AI model for your app type...",
+                "status": "generating",
+                "progress": "Initializing advanced architecture patterns"
+            })
+            
+            # Add a callback for progress updates during generation
+            async def generation_progress(message: str):
+                await notify_clients(project_id, {
+                    "type": "status",
+                    "message": message,
+                    "status": "generating"
+                })
+            
+            # Pass the callback if the generator supports it
+            if hasattr(advanced_generator, 'set_progress_callback'):
+                advanced_generator.set_progress_callback(generation_progress)
+            
             generated_code = await advanced_generator.generate_advanced_app(
                 description=validated_description,
                 app_name=app_name
             )
+            
+            # Add app_type to generated code if not present
+            if "app_type" not in generated_code and hasattr(architect, 'identify_app_type'):
+                generated_code["app_type"] = architect.identify_app_type(validated_description)
+            
+            # Send progress after initial generation
+            await notify_clients(project_id, {
+                "type": "status",
+                "message": "📝 Creating source files and app structure...",
+                "status": "generating",
+                "progress": "Generated initial architecture"
+            })
+            
         elif hasattr(enhanced_service, 'generate_ios_app_multi_llm'):
             generated_code = await enhanced_service.generate_ios_app_multi_llm(
                 description=validated_description,
@@ -585,8 +795,15 @@ Important: Return ONLY valid JSON, no explanatory text."""
             "self_healed": generated_code.get("self_healed", False),
             "validation_warnings": validation_result.warnings,
             "modifications": [],
-            "generation_timestamp": datetime.now().isoformat()
+            "generation_timestamp": datetime.now().isoformat(),
+            "app_complexity": app_complexity  # Store complexity for future modifications
         }
+        
+        # Update project.json with app_complexity so it persists across server restarts
+        project_metadata['app_complexity'] = app_complexity
+        project_metadata_path = os.path.join(project_path, "project.json")
+        with open(project_metadata_path, 'w') as f:
+            json.dump(project_metadata, f, indent=2)
 
         # Store initial state
         project_state[project_id] = {
@@ -595,10 +812,17 @@ Important: Return ONLY valid JSON, no explanatory text."""
         }
 
         # Step 4: Build project with enhanced error recovery
+        complexity_build_messages = {
+            "high": f"🏗️ Compiling {app_name} (complex app - this may take a moment)...",
+            "medium": f"🏗️ Compiling {app_name} (multiple features to build)...",
+            "low": f"🏗️ Compiling {app_name}..."
+        }
+        
         await notify_clients(project_id, {
             "type": "status",
-            "message": f"🏗️ Compiling {app_name}...",
-            "status": "building"
+            "message": complexity_build_messages.get(app_complexity, f"🏗️ Compiling {app_name}..."),
+            "status": "building",
+            "complexity": app_complexity
         })
 
         # Set build status callback
@@ -618,7 +842,7 @@ Important: Return ONLY valid JSON, no explanatory text."""
         print(f"[MAIN] Build service error recovery: {hasattr(build_service, 'error_recovery_system')}")
         
         try:
-            build_result = await build_service.build_project(project_path, project_id, bundle_id)
+            build_result = await build_service.build_project(project_path, project_id, bundle_id, app_complexity)
             print(f"[MAIN] Build completed with success={build_result.success}")
             print(f"[MAIN] Build errors: {len(build_result.errors) if build_result.errors else 0}")
             print(f"[MAIN] Build warnings: {len(build_result.warnings) if build_result.warnings else 0}")
@@ -645,12 +869,19 @@ Important: Return ONLY valid JSON, no explanatory text."""
             total_time = (datetime.now() - generation_start_time).total_seconds()
             time_display = f"{int(total_time)}s" if total_time < 60 else f"{int(total_time/60)}m {int(total_time%60)}s"
             
+            # Add next steps checklist based on app type
+            next_steps_checklist = _generate_next_steps_checklist(
+                app_complexity=app_complexity,
+                app_type=generated_code.get("app_type", "general"),
+                features=generated_code.get("features", [])
+            )
+            
             success_message = f"""✅ {app_name} has been created successfully!
 
 🎨 Unique Implementation: {unique_info}
 ✨ Features: {features_text}
 🤖 Generated by: {llm_used.upper()}
-⏱️ Total Time: {time_display}"""
+⏱️ Total Time: {time_display}{next_steps_checklist}"""
 
             await notify_clients(project_id, {
                 "type": "complete",
@@ -1018,7 +1249,20 @@ Return a JSON response with the modified files and changes made."""
                 })
 
         build_service.set_status_callback(build_status_callback)
-        build_result = await build_service.build_project(project_path, project_id, bundle_id)
+        
+        # Get app complexity from context to ensure complex apps get more build attempts
+        app_complexity = context.get("app_complexity", None)
+        
+        # If not in memory (e.g., server restarted), read from project.json
+        if not app_complexity:
+            app_complexity = project_metadata.get("app_complexity", "low")
+            print(f"[MAIN] Retrieved app_complexity from project.json: {app_complexity}")
+        else:
+            print(f"[MAIN] Using app_complexity from context: {app_complexity}")
+            
+        print(f"[MAIN] Building modification with complexity: {app_complexity}")
+        
+        build_result = await build_service.build_project(project_path, project_id, bundle_id, app_complexity)
 
         if build_result.success:
             modification_summary = modified_code.get("modification_summary", "Changes applied")

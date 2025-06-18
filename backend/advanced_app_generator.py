@@ -12,21 +12,38 @@ class AdvancedAppGenerator:
     
     def __init__(self, llm_service=None):
         self.llm_service = llm_service
+        self.progress_callback = None
         
         # App complexity templates - only include implemented ones
         self.app_templates = {
             "social_media": self._social_media_template,
             # More templates will be added as implemented
         }
+    
+    def set_progress_callback(self, callback):
+        """Set a callback for progress updates"""
+        self.progress_callback = callback
         
     async def generate_advanced_app(self, description: str, app_name: str) -> Dict:
         """Generate a complex app with proper architecture"""
         
+        # Send progress update
+        if self.progress_callback:
+            await self.progress_callback("🔍 Analyzing app requirements...")
+        
         # Detect app type from description
         app_type = self._detect_app_type(description)
         
+        # Send progress update
+        if self.progress_callback:
+            await self.progress_callback(f"📱 Detected {app_type.replace('_', ' ')} app type...")
+        
         # Get enhanced prompt for complex apps
         enhanced_prompt = self._build_advanced_prompt(description, app_name, app_type)
+        
+        # Send progress update
+        if self.progress_callback:
+            await self.progress_callback("🧠 Designing app architecture...")
         
         # Generate with LLM
         if self.llm_service:
@@ -34,6 +51,10 @@ class AdvancedAppGenerator:
                 description=enhanced_prompt,
                 app_name=app_name
             )
+            
+            # Send progress update
+            if self.progress_callback:
+                await self.progress_callback("🏗️ Building app components...")
             
             # Enhance with architectural components
             if result and "files" in result:

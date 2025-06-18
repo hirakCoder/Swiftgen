@@ -7,7 +7,7 @@ import os
 import json
 import numpy as np
 import requests
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 import hashlib
 from sentence_transformers import SentenceTransformer

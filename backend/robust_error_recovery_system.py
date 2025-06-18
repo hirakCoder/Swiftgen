@@ -56,6 +56,11 @@ class RobustErrorRecoverySystem:
         self.recovery_strategies = self._get_dynamic_recovery_strategies()
 
         self.logger.info("Robust error recovery system initialized")
+    
+    def reset_attempted_fixes(self):
+        """Reset attempted fixes counter for new generations"""
+        self.attempted_fixes.clear()
+        self.logger.info("Reset attempted fixes counter for new generation")
 
     def _load_error_patterns(self):
         """Load error patterns from file or use defaults"""
@@ -78,7 +83,9 @@ class RobustErrorRecoverySystem:
                     "bounce.*is only available",
                     "@Observable.*is only available",
                     "scrollBounceBehavior.*is only available",
-                    "contentTransition.*is only available"
+                    "contentTransition.*is only available",
+                    "ContentUnavailableView.*is only available",
+                    "'ContentUnavailableView' is only available"
                 ],
                 "fixes": [
                     "Replace .symbolEffect() with .scaleEffect or .opacity animations",
@@ -190,12 +197,43 @@ class RobustErrorRecoverySystem:
                     "conform to 'Decodable'",
                     "conform to 'Encodable'",
                     "conform to 'Codable'",
-                    "does not conform to protocol"
+                    "does not conform to protocol",
+                    "conform to 'Hashable'"
                 ],
                 "fixes": [
                     "Add protocol conformance to types",
                     "For JSON encoding/decoding, add : Codable",
+                    "For Hashable conformance, add : Hashable",
                     "Ensure all required protocol methods are implemented"
+                ]
+            },
+            "hashable_conformance": {
+                "patterns": [
+                    "must conform to 'Hashable'",
+                    "requires that .* conform to 'Hashable'",
+                    "Type .* does not conform to protocol 'Hashable'",
+                    "does not conform to protocol 'Hashable'",
+                    "'init.*' requires that '.*' conform to 'Hashable'",
+                    "instance method '.*' requires that '.*' conform to 'Hashable'",
+                    "error: type '.*' does not conform to protocol 'Hashable'",
+                    "error: type '.*' does not conform to protocol 'Equatable'"
+                ],
+                "fixes": [
+                    "Add : Hashable to the type declaration",
+                    "For structs with all Hashable properties, Swift synthesizes conformance automatically",
+                    "For custom types, implement hash(into:) and == methods",
+                    "Ensure all properties are Hashable for automatic synthesis"
+                ]
+            },
+            "toolbar_ambiguous": {
+                "patterns": [
+                    "ambiguous use of 'toolbar'",
+                    "ambiguous use of 'toolbar\(content:'"
+                ],
+                "fixes": [
+                    "Use .toolbar { } instead of .toolbar(content: { })",
+                    "Place toolbar modifier after navigationTitle",
+                    "Ensure toolbar is attached to correct view hierarchy"
                 ]
             }
         }
@@ -221,9 +259,10 @@ class RobustErrorRecoverySystem:
         # Create error fingerprint to track what we've tried
         error_fingerprint = self._create_error_fingerprint(errors)
         
+        # CRITICAL: Allow more recovery attempts and reset counters for new generations
         # Check if we've tried fixing this exact error pattern before
         if error_fingerprint in self.attempted_fixes:
-            if self.attempted_fixes[error_fingerprint] >= 2:
+            if self.attempted_fixes[error_fingerprint] >= 5:  # Increased from 2 to 5
                 self.logger.warning(f"Already attempted to fix this error pattern {self.attempted_fixes[error_fingerprint]} times. Stopping to avoid infinite loop.")
                 return False, swift_files, ["Automated recovery exhausted for this error pattern"]
         else:
@@ -231,6 +270,7 @@ class RobustErrorRecoverySystem:
         
         # Increment attempt count for this fingerprint
         self.attempted_fixes[error_fingerprint] += 1
+        self.logger.info(f"Recovery attempt {self.attempted_fixes[error_fingerprint]} for error pattern: {error_fingerprint[:100]}")
 
         # Analyze errors
         error_analysis = self._analyze_errors(errors)
@@ -315,6 +355,8 @@ class RobustErrorRecoverySystem:
             "protocol_conformance_errors": [],
             "persistence_controller_errors": [],
             "immutable_variable_errors": [],
+            "hashable_conformance_errors": [],
+            "toolbar_ambiguous_errors": [],
             "other_errors": []
         }
 
@@ -343,6 +385,10 @@ class RobustErrorRecoverySystem:
                             analysis["persistence_controller_errors"].append(error)
                         elif error_type == "immutable_variable":
                             analysis["immutable_variable_errors"].append(error)
+                        elif error_type == "hashable_conformance":
+                            analysis["hashable_conformance_errors"].append(error)
+                        elif error_type == "toolbar_ambiguous":
+                            analysis["toolbar_ambiguous_errors"].append(error)
                         categorized = True
                         break
                 if categorized:
@@ -356,6 +402,7 @@ class RobustErrorRecoverySystem:
     async def _pattern_based_recovery(self, errors: List[str], swift_files: List[Dict],
                                       error_analysis: Dict) -> Tuple[bool, List[Dict]]:
         """Pattern-based recovery for common errors"""
+        self.logger.info(f"Pattern-based recovery processing {len(errors)} errors: {[e[:80] for e in errors[:3]]}")
 
         # Check for iOS version errors
         has_ios_version_error = bool(error_analysis.get("ios_version_errors"))
@@ -373,13 +420,23 @@ class RobustErrorRecoverySystem:
         # Check for immutable variable errors
         has_immutable_error = any("cannot assign to value" in error and "is immutable" in error for error in errors)
         
+        # Check for hashable conformance errors
+        has_hashable_error = bool(error_analysis.get("hashable_conformance_errors")) or \
+                            any("conform to 'Hashable'" in error or "conform to 'Hashable'" in error for error in errors)
+        
+        # Check for toolbar ambiguity errors
+        has_toolbar_error = bool(error_analysis.get("toolbar_ambiguous_errors")) or \
+                           any("ambiguous use of 'toolbar'" in error for error in errors)
+        
         if not (error_analysis.get("string_literal_errors") or 
                 error_analysis.get("syntax_errors") or 
                 has_persistence_error or 
                 has_codable_error or
                 has_immutable_error or
                 has_ios_version_error or
-                has_module_error):
+                has_module_error or
+                has_hashable_error or
+                has_toolbar_error):
             return False, swift_files
 
         modified_files = []
@@ -391,6 +448,80 @@ class RobustErrorRecoverySystem:
 
             # Fix iOS version errors by replacing iOS 17+ features
             if has_ios_version_error:
+                # Replace ContentUnavailableView with custom implementation
+                if 'ContentUnavailableView' in content:
+                    # More comprehensive regex patterns for different ContentUnavailableView usages
+                    # Add logging
+                    self.logger.info(f"Found ContentUnavailableView in {file['path']}, applying iOS 16 compatible replacement")
+                    
+                    # Pattern 0: Simple ContentUnavailableView("Title", systemImage: "icon") without description
+                    content = re.sub(
+                        r'ContentUnavailableView\s*\(\s*"([^"]+)"\s*,\s*systemImage:\s*"([^"]+)"\s*\)',
+                        r'''VStack(spacing: 20) {
+                        Image(systemName: "\2")
+                            .font(.system(size: 50))
+                            .foregroundColor(.gray)
+                        Text("\1")
+                            .font(.title2)
+                            .foregroundColor(.gray)
+                    }
+                    .padding()''',
+                        content
+                    )
+                    
+                    # Pattern 1: ContentUnavailableView("Title", systemImage: "icon", description: Text("desc"))
+                    content = re.sub(
+                        r'ContentUnavailableView\s*\(\s*"([^"]+)"\s*,\s*systemImage:\s*"([^"]+)"\s*,\s*description:\s*Text\s*\(\s*"([^"]+)"\s*\)\s*\)',
+                        r'''VStack(spacing: 20) {
+                        Image(systemName: "\2")
+                            .font(.system(size: 50))
+                            .foregroundColor(.gray)
+                        Text("\1")
+                            .font(.title2)
+                            .foregroundColor(.gray)
+                        Text("\3")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()''',
+                        content
+                    )
+                    
+                    # Pattern 2: Generic ContentUnavailableView with any content
+                    content = re.sub(
+                        r'ContentUnavailableView\s*\{[^}]+\}',
+                        '''VStack(spacing: 20) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 50))
+                            .foregroundColor(.gray)
+                        Text("Content Unavailable")
+                            .font(.title2)
+                            .foregroundColor(.gray)
+                    }
+                    .padding()''',
+                        content,
+                        flags=re.DOTALL
+                    )
+                    
+                    # Pattern 3: Any remaining ContentUnavailableView - GENERIC replacement
+                    content = re.sub(
+                        r'ContentUnavailableView[^)]*\)',
+                        '''VStack(spacing: 20) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 50))
+                            .foregroundColor(.gray)
+                        Text("Content Unavailable")
+                            .font(.title2)
+                            .foregroundColor(.gray)
+                        Text("Please check back later")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()''',
+                        content
+                    )
+                    changes_made = True
+                
                 # Replace symbolEffect with spring animation
                 content = re.sub(
                     r'\.symbolEffect\([^)]*\)',
@@ -452,6 +583,8 @@ class RobustErrorRecoverySystem:
                 if content != original_content:
                     changes_made = True
                     self.logger.info(f"Fixed iOS version compatibility issues in {file['path']}")
+                else:
+                    self.logger.info(f"No iOS version fixes needed in {file['path']}")
 
             # Fix module import errors
             if has_module_error:
@@ -624,6 +757,139 @@ class RobustErrorRecoverySystem:
                                     content = content.replace(full_match, new_declaration)
                                     changes_made = True
                                     break
+            
+            # Fix Hashable conformance errors
+            if has_hashable_error:
+                hashable_errors = error_analysis.get("hashable_conformance_errors", []) + \
+                                 [e for e in errors if "Hashable" in e]
+                
+                for error in hashable_errors:
+                    # Multiple patterns to catch all Hashable error variants
+                    type_name = None
+                    
+                    # Pattern 1: 'TypeName' must conform to 'Hashable'
+                    match = re.search(r"'(\w+)' must conform to 'Hashable'", error)
+                    if match:
+                        type_name = match.group(1)
+                    
+                    # Pattern 2: requires that 'TypeName' conform to 'Hashable'
+                    if not type_name:
+                        match = re.search(r"requires that '(\w+)' conform to 'Hashable'", error)
+                        if match:
+                            type_name = match.group(1)
+                    
+                    # Pattern 3: Type 'TypeName' does not conform to protocol 'Hashable'
+                    if not type_name:
+                        match = re.search(r"Type '(\w+)' does not conform to protocol 'Hashable'", error)
+                        if match:
+                            type_name = match.group(1)
+                    
+                    # Pattern 4: type 'TypeName' does not conform to protocol 'Hashable'
+                    if not type_name:
+                        match = re.search(r"type '(\w+)' does not conform to protocol 'Hashable'", error)
+                        if match:
+                            type_name = match.group(1)
+                    
+                    # Pattern 5: 'TypeName' does not conform to protocol 'Hashable'
+                    if not type_name:
+                        match = re.search(r"'(\w+)' does not conform to protocol 'Hashable'", error)
+                        if match:
+                            type_name = match.group(1)
+                    
+                    # Pattern 6: Same patterns for Equatable (which is part of Hashable)
+                    if not type_name:
+                        match = re.search(r"'(\w+)' does not conform to protocol 'Equatable'", error)
+                        if match:
+                            type_name = match.group(1)
+                    
+                    if type_name:
+                        self.logger.info(f"Found type {type_name} needs Hashable conformance")
+                        
+                        # Find the type definition
+                        struct_pattern = rf'(struct\s+{type_name}(?:\s*:\s*([^{{]+))?\s*{{)'
+                        class_pattern = rf'(class\s+{type_name}(?:\s*:\s*([^{{]+))?\s*{{)'
+                        enum_pattern = rf'(enum\s+{type_name}(?:\s*:\s*([^{{]+))?\s*{{)'
+                        
+                        for pattern in [struct_pattern, class_pattern, enum_pattern]:
+                            match = re.search(pattern, content)
+                            if match:
+                                full_match = match.group(0)
+                                existing_conformances = match.group(2) if match.group(2) else ""
+                                
+                                if "Hashable" not in existing_conformances:
+                                    if existing_conformances:
+                                        # Add to existing conformances
+                                        new_conformances = existing_conformances.strip() + ", Hashable"
+                                        new_declaration = full_match.replace(existing_conformances, new_conformances)
+                                    else:
+                                        # Add conformance
+                                        type_keyword = "struct" if "struct" in full_match else ("class" if "class" in full_match else "enum")
+                                        new_declaration = full_match.replace(
+                                            f"{type_keyword} {type_name}",
+                                            f"{type_keyword} {type_name}: Hashable"
+                                        )
+                                    
+                                    content = content.replace(full_match, new_declaration)
+                                    
+                                    # For types with complex properties that might need custom implementation
+                                    # Check if we need to add hash(into:) and == methods
+                                    if not re.search(rf'func hash\(into hasher: inout Hasher\)', content) and \
+                                       not re.search(rf'static func == \(lhs: {type_name}, rhs: {type_name}\) -> Bool', content):
+                                        
+                                        # Find closing brace of the type
+                                        type_start = content.find(new_declaration) + len(new_declaration)
+                                        brace_count = 1
+                                        i = type_start
+                                        
+                                        while i < len(content) and brace_count > 0:
+                                            if content[i] == '{':
+                                                brace_count += 1
+                                            elif content[i] == '}':
+                                                brace_count -= 1
+                                            i += 1
+                                        
+                                        if brace_count == 0:
+                                            # Insert hash and equality methods before the closing brace
+                                            insertion_point = i - 1  # Before the closing brace
+                                            hash_methods = f"""
+    
+    func hash(into hasher: inout Hasher) {{
+        hasher.combine(id)
+    }}
+    
+    static func == (lhs: {type_name}, rhs: {type_name}) -> Bool {{
+        lhs.id == rhs.id
+    }}
+"""
+                                            content = content[:insertion_point] + hash_methods + content[insertion_point:]
+                                            self.logger.info(f"Added hash(into:) and == methods to {type_name}")
+                                    
+                                    changes_made = True
+                                    self.logger.info(f"Added Hashable conformance to {type_name} in {file['path']}")
+                                    break
+            
+            # Fix toolbar ambiguity errors
+            if has_toolbar_error:
+                # Replace .toolbar(content: { }) with .toolbar { }
+                content = re.sub(r'\.toolbar\s*\(\s*content\s*:\s*\{', '.toolbar {', content)
+                
+                # Find and fix duplicate toolbar modifiers
+                lines = content.split('\n')
+                toolbar_lines = []
+                for i, line in enumerate(lines):
+                    if '.toolbar' in line:
+                        toolbar_lines.append(i)
+                
+                # If multiple toolbars found, keep only the first one
+                if len(toolbar_lines) > 1:
+                    # Find the complete toolbar blocks
+                    for idx in reversed(toolbar_lines[1:]):
+                        # Simple approach: remove the line with .toolbar
+                        if idx < len(lines):
+                            lines[idx] = '// ' + lines[idx]  # Comment out duplicate toolbars
+                    content = '\n'.join(lines)
+                    changes_made = True
+                    self.logger.info("Fixed toolbar ambiguity by commenting duplicate toolbars")
             
             # Fix common syntax errors
             content = re.sub(r'\.presentationMode', '.dismiss', content)
@@ -901,7 +1167,13 @@ class RobustErrorRecoverySystem:
                     if missing_views:
                         modification_request = f"Fix these build errors by creating the missing SwiftUI views:\n"
                         for view in missing_views:
-                            modification_request += f"- Create {view}.swift with a proper SwiftUI View implementation\n"
+                            # Specify proper path structure
+                            view_path = f"Sources/Views/{view}.swift"
+                            modification_request += f"- Create {view_path} with a proper SwiftUI View implementation for {view}\n"
+                        modification_request += f"\nMake sure to:\n"
+                        modification_request += f"1. Create files in the correct directory structure (Sources/Views/ for views)\n"
+                        modification_request += f"2. Include all necessary imports (import SwiftUI)\n"
+                        modification_request += f"3. Make the views match their usage in the app\n"
                         modification_request += f"\nErrors:\n{chr(10).join(errors[:5])}"
                     else:
                         modification_request = f"Fix these build errors:\n{chr(10).join(errors[:5])}"
@@ -920,7 +1192,12 @@ class RobustErrorRecoverySystem:
                             valid_files = []
                             for f in result["files"]:
                                 if isinstance(f, dict) and "content" in f and f["content"]:
-                                    valid_files.append(f)
+                                    # Apply string literal fixes
+                                    fixed_content = self._fix_string_literals(f["content"])
+                                    valid_files.append({
+                                        "path": f["path"],
+                                        "content": fixed_content
+                                    })
                                 else:
                                     # Use original file if recovery failed
                                     for orig in swift_files:
@@ -1238,7 +1515,17 @@ struct ContentView: View {
         try:
             result = json.loads(response)
             if "files" in result:
-                return result["files"]
+                # Post-process files to fix common string literal issues
+                fixed_files = []
+                for file in result["files"]:
+                    content = file["content"]
+                    # Fix smart quotes and ensure proper string formatting
+                    content = self._fix_string_literals(content)
+                    fixed_files.append({
+                        "path": file["path"],
+                        "content": content
+                    })
+                return fixed_files
         except json.JSONDecodeError:
             pass
 
@@ -1255,13 +1542,13 @@ struct ContentView: View {
                     if "@main" in file["content"] and "@main" in block:
                         fixed_files.append({
                             "path": file["path"],
-                            "content": block.strip()
+                            "content": self._fix_string_literals(block.strip())
                         })
                         break
                     elif "ContentView" in file["path"] and "ContentView" in block:
                         fixed_files.append({
                             "path": file["path"],
-                            "content": block.strip()
+                            "content": self._fix_string_literals(block.strip())
                         })
                         break
 
@@ -1269,6 +1556,86 @@ struct ContentView: View {
                 return fixed_files
 
         return None
+    
+    def _fix_string_literals(self, content: str) -> str:
+        """Fix common string literal issues in Swift code"""
+        # Replace smart quotes with regular quotes
+        content = content.replace('"', '"').replace('"', '"')
+        content = content.replace(''', "'").replace(''', "'")
+        
+        # CRITICAL: Fix malformed String(format:) patterns first
+        
+        # Pattern 1: Text with text before String(format:)
+        # Fix: Text("Minimum order: String(format: "%.2f", value)")
+        # To: Text("Minimum order: \(String(format: "%.2f", value))")
+        content = re.sub(
+            r'Text\("([^"]*?)String\(format:\s*"([^"]+)",\s*([^)]+)\)"\)',
+            r'Text("\1\\(String(format: "\2", \3))")',
+            content
+        )
+        
+        # Pattern 2: Text("String(format: "%.2f", value)")  
+        content = re.sub(
+            r'Text\("String\(format:\s*"([^"]+)",\s*([^)]+)\)"\)',
+            r'Text(String(format: "\1", \2))',
+            content
+        )
+        
+        # Pattern 3: "String(format: "%.2f", value)"
+        content = re.sub(
+            r'"String\(format:\s*"([^"]+)",\s*([^)]+)\)"',
+            r'String(format: "\1", \2)',
+            content
+        )
+        
+        # Fix string interpolation issues
+        content = re.sub(
+            r'\$\\\(([^,]+),\s*specifier:\s*"([^"]+)"\)',
+            r'String(format: "\2", \1)',
+            content
+        )
+        
+        # Fix Text() with malformed string interpolation
+        content = re.sub(
+            r'Text\("([^"]*)\$\\\(([^)]+)\)([^"]*)"\.font',
+            r'Text("\1\\(\2)\3").font',
+            content
+        )
+        
+        # Fix specific patterns we're seeing in the logs
+        lines = content.split('\n')
+        fixed_lines = []
+        fixes_made = 0
+        for i, line in enumerate(lines):
+            original_line = line
+            # Fix any remaining String(format: issues
+            if '"String(format:' in line and 'Text(' in line:
+                # Pattern: Text("String(format: "%.2f", value)")
+                line = re.sub(
+                    r'Text\("String\(format:\s*"([^"]+)",\s*([^)]+)\)"\)',
+                    r'Text(String(format: "\1", \2))',
+                    line
+                )
+                if line != original_line:
+                    fixes_made += 1
+                    self.logger.info(f"Fixed string literal on line {i+1}: {original_line.strip()[:50]} -> {line.strip()[:50]}")
+            elif 'String(format:' in line and not line.strip().startswith('Text(String(format:'):
+                # Standalone malformed String(format:
+                line = re.sub(
+                    r'"String\(format:\s*"([^"]+)",\s*([^)]+)\)"',
+                    r'String(format: "\1", \2)',
+                    line
+                )
+                if line != original_line:
+                    fixes_made += 1
+                    self.logger.info(f"Fixed standalone string format on line {i+1}: {original_line.strip()[:50]} -> {line.strip()[:50]}")
+            
+            fixed_lines.append(line)
+        
+        if fixes_made > 0:
+            self.logger.info(f"Applied {fixes_made} string literal fixes to content")
+        
+        return '\n'.join(fixed_lines)
 
 
 def create_intelligent_recovery_system(claude_service=None, openai_key=None, xai_key=None):

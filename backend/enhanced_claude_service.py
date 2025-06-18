@@ -140,6 +140,24 @@ class EnhancedClaudeService:
         if not self.available_models:
             raise Exception("No LLM model available")
         
+        app_name = app_name or "MyApp"
+        
+        # Check if this is a complex app and use architect if needed
+        try:
+            from complex_app_architect import ComplexAppArchitect
+            architect = ComplexAppArchitect()
+            complexity = architect.analyze_complexity(description)
+            
+            if complexity == "high":
+                logger.info(f"[ARCHITECT] Detected high-complexity app. Using architectural planning...")
+                # Use architect to create enhanced prompt
+                enhanced_description = architect.create_enhanced_prompt(description, app_name)
+                # Override the description with the architect's detailed plan
+                description = enhanced_description
+                logger.info(f"[ARCHITECT] Created detailed architecture plan for {architect.identify_app_type(description)} app")
+        except ImportError:
+            logger.warning("ComplexAppArchitect not available, using standard generation")
+        
         # Use intelligent routing if available
         if self.router:
             available_providers = [model.provider for model in self.available_models]

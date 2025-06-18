@@ -352,7 +352,8 @@ class ProjectManager:
             'bundle_id': bundle_id,
             'created_at': datetime.now().isoformat(),
             'files': valid_files,
-            'validation_issues': validation_issues
+            'validation_issues': validation_issues,
+            'app_complexity': 'low'  # Default, will be updated by main.py
         }
 
         metadata_path = os.path.join(project_path, 'project.json')

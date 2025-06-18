@@ -1,0 +1,15 @@
+{
+  "title": "Validation Failure: 2025-06-18 14:20",
+  "content": "Validation failed with 3 errors:\n[BuildabilityValidator] Sources/Views/RestaurantDetailView.swift:63: Possible unterminated string literal\n[BuildabilityValidator] Sources/Views/CartView.swift:19: Possible unterminated string literal\n[BuildabilityValidator] Sources/Views/CartView.swift:58: Possible unterminated string literal",
+  "tags": [
+    "validation",
+    "failure",
+    "BuildabilityValidator",
+    "BuildabilityValidator",
+    "BuildabilityValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

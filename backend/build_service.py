@@ -92,11 +92,12 @@ class BuildService:
     """Build service with intelligent error recovery and simulator support"""
 
     def __init__(self):
-        self.max_attempts = 3  # Allow enough attempts for recovery
+        self.max_attempts = 3  # Default attempts for simple apps
         self.status_callback = None
         self.backend_dir = os.path.dirname(os.path.abspath(__file__))
         self.build_logs_dir = os.path.join(self.backend_dir, "build_logs")
         os.makedirs(self.build_logs_dir, exist_ok=True)
+        self.app_complexity = None  # Will be set during build
 
         # Initialize simulator service if available
         self.simulator_service = SimulatorService() if SimulatorService else None
@@ -117,6 +118,24 @@ class BuildService:
             print("✓ RAG Knowledge Base initialized for build service")
         except Exception as e:
             print(f"⚠️ RAG Knowledge Base not available: {e}")
+        
+        # Initialize file structure manager
+        self.file_structure_manager = None
+        try:
+            from file_structure_manager import FileStructureManager
+            self.file_structure_manager = FileStructureManager()
+            print("✓ File Structure Manager initialized for build service")
+        except Exception as e:
+            print(f"⚠️ File Structure Manager not available: {e}")
+        
+        # Initialize debug logger
+        self.debug_logger = None
+        try:
+            from debug_logger import DebugLogger
+            # Will be initialized per project
+            print("✓ Debug Logger available for build service")
+        except Exception as e:
+            print(f"⚠️ Debug Logger not available: {e}")
 
         try:
             if RobustErrorRecoverySystem:
@@ -154,13 +173,45 @@ class BuildService:
             except Exception as e:
                 print(f"Error in status callback: {e}")
 
-    async def build_project(self, project_path: str, project_id: str, bundle_id: str) -> BuildResult:
+    async def build_project(self, project_path: str, project_id: str, bundle_id: str, app_complexity: str = None) -> BuildResult:
         """Build iOS project with multiple recovery strategies"""
 
         start_time = datetime.now()
         errors = []
         warnings = []
         build_log = []
+        
+        # CRITICAL: Reset attempted fixes for each new build to prevent getting stuck
+        if self.error_recovery_system:
+            self.error_recovery_system.reset_attempted_fixes()
+            print(f"[BUILD] Reset error recovery attempts for fresh start")
+        
+        # Set max attempts based on complexity
+        if app_complexity:
+            self.app_complexity = app_complexity
+            print(f"[BUILD] Setting complexity: {app_complexity}")
+            if app_complexity == "high":
+                self.max_attempts = 5  # More attempts for complex apps
+                print(f"[BUILD] High complexity app - setting max_attempts to 5")
+                await self._update_status("🏗️ Building complex app (may take longer)...")
+            elif app_complexity == "medium":
+                self.max_attempts = 4
+                print(f"[BUILD] Medium complexity app - setting max_attempts to 4")
+                await self._update_status("🏗️ Building medium complexity app...")
+            else:
+                self.max_attempts = 3
+                print(f"[BUILD] Low complexity app - setting max_attempts to 3")
+                await self._update_status("🏗️ Building app...")
+        else:
+            print(f"[BUILD] No complexity specified - using default max_attempts: {self.max_attempts}")
+        
+        # Initialize debug logger for this project
+        if self.debug_logger is None:
+            try:
+                from debug_logger import DebugLogger
+                self.debug_logger = DebugLogger(project_id)
+            except:
+                pass
         
         # Create log file path for this build
         log_filename = f"proj_{project_id}_build.log"
@@ -200,6 +251,11 @@ class BuildService:
                         })
 
         await self._update_status(f"Found {len(swift_files)} Swift files in project")
+        
+        # Log file structure if debug logger available
+        if self.debug_logger:
+            self.debug_logger.log_file_structure(swift_files, phase="initial")
+            self.debug_logger.log_directory_structure(project_path)
 
         if not swift_files:
             return BuildResult(
@@ -390,6 +446,12 @@ class BuildService:
             last_build_errors = current_errors
             
             print(f"[BUILD] Build attempt {attempt} failed with {len(current_errors)} errors")
+            
+            # Log build errors if debug logger available
+            if self.debug_logger:
+                self.debug_logger.log_build_attempt(attempt, self.max_attempts)
+                for error in current_errors[:10]:  # Log first 10 errors
+                    self.debug_logger.log_build_error(error)
 
             if attempt < self.max_attempts:
                 await self._update_status("❌ Build failed. Analyzing errors and applying fixes...")
@@ -418,24 +480,57 @@ class BuildService:
                         if success and fixed_files:
                             print(f"[BUILD] Recovery succeeded with {len(fixed_files)} fixed files")
                             await self._update_status(f"📝 Writing {len(fixed_files)} fixed files...")
-                            # Write fixed files back preserving directory structure
-                            for file in fixed_files:
-                                if not isinstance(file, dict) or "path" not in file or "content" not in file:
-                                    print(f"[BUILD] Skipping invalid file: {type(file)}")
-                                    continue  # Skip invalid files silently
+                            
+                            # Use file structure manager for organized writing and verification
+                            if self.file_structure_manager:
+                                # First organize files into proper structure
+                                organized_files, file_mapping = self.file_structure_manager.organize_files(
+                                    fixed_files, project_path
+                                )
                                 
-                                # Use the full relative path to preserve directory structure
-                                file_path = os.path.join(project_path, file["path"])
+                                # Write files with verification
+                                write_success, written_files, failed_files = self.file_structure_manager.verify_and_write_files(
+                                    organized_files, project_path
+                                )
                                 
-                                # Create directory if it doesn't exist
-                                file_dir = os.path.dirname(file_path)
-                                os.makedirs(file_dir, exist_ok=True)
+                                if failed_files:
+                                    warnings.append(f"Failed to write {len(failed_files)} files: {', '.join(failed_files[:3])}")
                                 
-                                print(f"[BUILD] Writing fixed file: {file_path}")
-                                with open(file_path, 'w') as f:
-                                    f.write(file["content"])
+                                # Log file structure
+                                print(f"[BUILD] File structure after recovery:")
+                                print(self.file_structure_manager.get_file_tree(project_path))
+                                
+                                # Debug logging for file operations
+                                if self.debug_logger:
+                                    self.debug_logger.log_error_recovery("File Structure Manager", {
+                                        "organized_files": len(organized_files),
+                                        "written_files": len(written_files),
+                                        "failed_files": len(failed_files),
+                                        "file_mapping": len(file_mapping)
+                                    })
+                                    self.debug_logger.log_file_structure(organized_files, phase="recovery")
+                                    self.debug_logger.log_directory_structure(project_path)
+                                
+                                await self._update_status(f"✅ Verified {len(written_files)} files written successfully")
+                            else:
+                                # Fallback to original method
+                                for file in fixed_files:
+                                    if not isinstance(file, dict) or "path" not in file or "content" not in file:
+                                        print(f"[BUILD] Skipping invalid file: {type(file)}")
+                                        continue  # Skip invalid files silently
                                     
-                            await self._update_status(f"✅ Fixed files written successfully")
+                                    # Use the full relative path to preserve directory structure
+                                    file_path = os.path.join(project_path, file["path"])
+                                    
+                                    # Create directory if it doesn't exist
+                                    file_dir = os.path.dirname(file_path)
+                                    os.makedirs(file_dir, exist_ok=True)
+                                    
+                                    print(f"[BUILD] Writing fixed file: {file_path}")
+                                    with open(file_path, 'w') as f:
+                                        f.write(file["content"])
+                                        
+                                await self._update_status(f"✅ Fixed files written successfully")
 
                             # Update swift_files for next iteration
                             swift_files = fixed_files

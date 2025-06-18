@@ -228,7 +228,7 @@
                     <div id="currentStatusMessage" class="mb-3 px-4 py-3 bg-gray-800/50 rounded-lg border border-gray-700">
                         <p class="text-sm text-gray-300 font-medium">
                             <i class="fas fa-circle-notch fa-spin mr-2 text-xs"></i>
-                            <span>Initializing...</span>
+                            <span id="progressText">Initializing...</span>
                         </p>
                     </div>
                     
@@ -565,13 +565,25 @@
 
             switch (data.type) {
                 case 'status':
-                    console.log('[WS] Status update:', data.message);
+                    console.log('[WS] Status update received:', {
+                        message: data.message,
+                        status: data.status,
+                        timestamp: new Date().toISOString()
+                    });
                     this.updateStatus(data.message, data.status);
+                    
+                    // Remove typing indicator on first status update during generation
+                    if (!this.currentProjectId || this.isGenerating) {
+                        console.log('[WS] Removing typing indicator due to status update');
+                        this.removeTypingIndicator();
+                    }
                     
                     // Map backend status to UI stages
                     const stageMapping = {
+                        'initializing': 'design',
                         'analyzing': 'design',
                         'generating': 'implement',
+                        'generated': 'validate',
                         'validating': 'validate',
                         'healing': 'fix',
                         'creating': 'implement',
@@ -679,8 +691,35 @@
             // Start timer
             this.startGenerationTimer();
 
-            // Add typing indicator
+            // Add typing indicator temporarily
             this.addTypingIndicator();
+            
+            // After a short delay, replace typing with initial status
+            setTimeout(() => {
+                this.removeTypingIndicator();
+                
+                // Add a subtle initial status that will be updated
+                const initialStatusDiv = document.createElement('div');
+                initialStatusDiv.id = 'currentStatusLineContainer';
+                initialStatusDiv.className = 'chat-message';
+                initialStatusDiv.innerHTML = `
+                    <div class="flex items-start space-x-3">
+                        <div class="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-robot text-white text-sm"></i>
+                        </div>
+                        <div class="flex-1 max-w-md">
+                            <div id="currentStatusLine" class="bg-gray-800/30 px-4 py-2 rounded-xl rounded-tl-none border border-gray-700/50 transition-all duration-300">
+                                <div class="text-sm text-gray-400 flex items-center">
+                                    <i class="fas fa-circle-notch fa-spin text-gray-500 mr-2"></i>
+                                    <span id="progressText">Getting ready...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                this.chatMessages.appendChild(initialStatusDiv);
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }, 300); // Show typing briefly then transition to status
 
             try {
                 // Determine if this is a modification or new generation
@@ -904,15 +943,37 @@
                 indicator.remove();
             }
         }
+        
+        getStatusIcon(status) {
+            const statusIcons = {
+                'initializing': 'fas fa-circle-notch fa-spin text-gray-500',
+                'analyzing': 'fas fa-circle-notch fa-spin text-blue-500',
+                'generating': 'fas fa-circle-notch fa-spin text-purple-500',
+                'validating': 'fas fa-circle-notch fa-spin text-yellow-500',
+                'healing': 'fas fa-circle-notch fa-spin text-orange-500',
+                'creating': 'fas fa-circle-notch fa-spin text-green-500',
+                'building': 'fas fa-circle-notch fa-spin text-indigo-500',
+                'success': 'fas fa-check-circle text-green-500',
+                'failed': 'fas fa-times-circle text-red-500'
+            };
+            
+            return statusIcons[status] || 'fas fa-circle-notch fa-spin text-gray-500';
+        }
 
         updateStatus(message, status) {
+            console.log('[UI] updateStatus called:', { message, status, timestamp: new Date().toISOString() });
+            
             // Update the prominent status message
+            const progressText = document.getElementById('progressText');
+            if (progressText) {
+                console.log('[UI] Updating progressText with:', message);
+                progressText.textContent = message;
+            } else {
+                console.error('[UI] progressText element not found!');
+            }
+            
             const currentStatusMessage = document.querySelector('#currentStatusMessage p');
             if (currentStatusMessage) {
-                const statusSpan = currentStatusMessage.querySelector('span');
-                if (statusSpan) {
-                    statusSpan.textContent = message;
-                }
                 
                 // Update icon based on status
                 const icon = currentStatusMessage.querySelector('i');
@@ -936,6 +997,96 @@
                         icon.className = 'fas fa-circle-notch fa-spin text-gray-400 mr-2';
                     }
                 }
+            }
+            
+            // IMPORTANT: Show key status updates in chat for visibility, but keep it clean
+            // Remove typing indicator first
+            this.removeTypingIndicator();
+            
+            // Track last status to avoid duplicate updates
+            if (!this.lastStatusShown) {
+                this.lastStatusShown = { status: '', message: '', timestamp: 0 };
+            }
+            
+            // Show ALL progress updates during critical phases to keep user informed
+            const importantStatuses = {
+                'initializing': true,
+                'analyzing': true, 
+                'generating': true,
+                'validating': true,
+                'creating': true,
+                'building': true,
+                'success': true,
+                'failed': true,
+                'error': true
+            };
+            
+            // Always show different messages or after short intervals during building
+            const now = Date.now();
+            const timeSinceLastStatus = now - this.lastStatusShown.timestamp;
+            const isDifferentStatus = status !== this.lastStatusShown.status;
+            const isDifferentMessage = message !== this.lastStatusShown.message;
+            const isImportantStatus = importantStatuses[status];
+            const isFinalMessage = message.includes('✅') || message.includes('❌');
+            const isBuildingPhase = status === 'building' || message.includes('Building') || message.includes('Compiling');
+            
+            // CRITICAL: Show all updates during building and important phases
+            console.log('[UI] Status check:', { 
+                isImportantStatus, 
+                isFinalMessage, 
+                isBuildingPhase,
+                status, 
+                timeSinceLastStatus,
+                isDifferentStatus,
+                isDifferentMessage
+            });
+            
+            // Show updates if it's important, different, or enough time has passed
+            if (isImportantStatus || isFinalMessage || isBuildingPhase || isDifferentStatus || isDifferentMessage || timeSinceLastStatus > 300) {
+                // Update or create a single status line instead of multiple messages
+                let statusElement = document.getElementById('currentStatusLine');
+                
+                if (!statusElement) {
+                    // Create a subtle status line
+                    const statusDiv = document.createElement('div');
+                    statusDiv.id = 'currentStatusLineContainer';
+                    statusDiv.className = 'chat-message';
+                    statusDiv.innerHTML = `
+                        <div class="flex items-start space-x-3">
+                            <div class="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-robot text-white text-sm"></i>
+                            </div>
+                            <div class="flex-1 max-w-md">
+                                <div id="currentStatusLine" class="bg-gray-800/30 px-4 py-2 rounded-xl rounded-tl-none border border-gray-700/50 transition-all duration-300">
+                                    <div class="text-sm text-gray-400 flex items-center">
+                                        <i class="${this.getStatusIcon(status)} mr-2"></i>
+                                        <span>${message}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    this.chatMessages.appendChild(statusDiv);
+                } else {
+                    // Update existing status line with smooth transition
+                    console.log('[UI] Updating existing status line with:', message);
+                    statusElement.innerHTML = `
+                        <div class="text-sm text-gray-400 flex items-center">
+                            <i class="${this.getStatusIcon(status)} mr-2"></i>
+                            <span>${message}</span>
+                        </div>
+                    `;
+                    
+                    // Add subtle pulse animation for updates
+                    statusElement.classList.add('animate-pulse');
+                    setTimeout(() => statusElement.classList.remove('animate-pulse'), 1000);
+                }
+                
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+                this.lastStatusShown = { status, message, timestamp: now };
+                console.log('[UI] Status line updated successfully:', message);
+            } else {
+                console.log('[UI] Status update skipped due to filtering conditions');
             }
             
             // Add to detailed status with color coding
@@ -1118,6 +1269,12 @@
             
             // Remove typing indicator if present
             this.removeTypingIndicator();
+            
+            // Remove the status line container to keep chat clean
+            const statusLineContainer = document.getElementById('currentStatusLineContainer');
+            if (statusLineContainer) {
+                statusLineContainer.remove();
+            }
             
             // Hide progress animation
             const progressElement = document.querySelector('.animate-pulse');
