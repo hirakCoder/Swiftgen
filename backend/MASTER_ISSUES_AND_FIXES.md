@@ -55,6 +55,16 @@
 - Created specific handlers like `_fix_count_bug()`
 - Now actually modifies files when LLM fails
 
+### 6. Modification Introduces Syntax Errors (Discovered: Dec 19, 2024)
+**Problem**: Modifications that appear to work actually introduce syntax errors
+**Symptoms**: 
+- Modification succeeds
+- Build fails with "consecutive statements on a line must be separated by ';'"
+- Error recovery fixes it and app launches
+**Root Cause**: LLM generates syntactically incorrect Swift code during modifications
+**Current State**: Error recovery handles it, but adds time
+**Fix Needed**: Better syntax validation before applying modifications
+
 ---
 
 ## Recurring Issues
@@ -110,10 +120,11 @@
 - Basic modifications (with automatic fixes)
 - Simulator launch
 - Real-time UI updates
+- xAI Grok integration (confirmed working with grok-3-latest)
 
 ### Partially Working ⚠️
 - Complex app generation (templates created, not fully tested)
-- xAI integration (model name updated, API key needs verification)
+- Modifications (work but sometimes need error recovery for syntax issues)
 - Modification JSON parsing (fallbacks in place)
 
 ### Not Working ❌

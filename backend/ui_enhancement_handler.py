@@ -229,6 +229,12 @@ class UIEnhancementHandler:
     def _fix_common_syntax_errors(self, content: str) -> str:
         """Fix common SwiftUI syntax errors"""
         
+        # Fix missing semicolons (consecutive statements on same line)
+        # Pattern: word followed by another word with assignment
+        content = re.sub(r'(\w+)\s+(\w+\s*=)', r'\1; \2', content)
+        # Pattern: closing paren followed by statement
+        content = re.sub(r'(\))\s+([a-zA-Z]\w*\s*[=\(])', r'\1; \2', content)
+        
         # Fix duplicate modifiers
         content = re.sub(r'(\.transition\([^)]+\)\s*\.animation\([^)]+\))\s*\1', r'\1', content)
         
