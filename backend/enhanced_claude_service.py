@@ -372,6 +372,46 @@ Return a JSON response with this EXACT structure:
             return {"success": False, "error": str(e), "text": ""}
         finally:
             loop.close()
+    
+    async def get_completion(self, system_prompt: str, user_prompt: str, max_tokens: int = 4096, temperature: float = 0.7) -> str:
+        """Get completion from current LLM model - for chat handler compatibility"""
+        try:
+            # Use the current model with provided prompts
+            response = await self._generate_with_current_model(system_prompt, user_prompt)
+            return response
+        except Exception as e:
+            print(f"Error in get_completion: {e}")
+            raise
+    
+    async def extract_app_name(self, description: str) -> str:
+        """Use LLM to extract a proper app name from description"""
+        prompt = f"""Given this iOS app description, provide a proper app name.
+
+Description: {description}
+
+Requirements:
+- The name should be 1-4 words maximum
+- It should be descriptive and memorable
+- Avoid generic names like "MyApp" or "App"
+- Don't include "iOS" or "App" in the name unless essential
+- Make it suitable for the App Store
+
+Return ONLY the app name, nothing else. No explanation or quotes."""
+
+        try:
+            # Use a low temperature for consistent naming
+            response = await self._generate_with_current_model("You are an app naming expert.", prompt)
+            if response:
+                app_name = response.strip().strip('"').strip("'")
+                # Limit length
+                if len(app_name) > 30:
+                    app_name = app_name[:30].rsplit(' ', 1)[0]
+                return app_name
+            else:
+                return None
+        except Exception as e:
+            print(f"[LLM] Failed to extract app name: {e}")
+            return None
 
     # Optional: Add these methods if your main.py expects them
     async def generate_ios_app_multi_llm(self, description: str, app_name: str = None) -> Dict[str, Any]:

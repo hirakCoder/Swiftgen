@@ -167,6 +167,9 @@ class ComprehensiveCodeValidator:
         # Check missing imports
         issues.extend(self._check_missing_imports(file_path, content))
         
+        # Check MainActor issues
+        issues.extend(self._check_main_actor_issues(file_path, content))
+        
         return issues
     
     def _check_reserved_types(self, file_path: str, content: str) -> List[CodeIssue]:
@@ -271,13 +274,25 @@ class ComprehensiveCodeValidator:
         
         for pattern, message in self.syntax_patterns.items():
             if re.search(pattern, content):
+                # Determine the category based on the message
+                category = 'syntax'
+                severity = 'warning'
+                fix = None
+                
+                # MainActor related issues
+                if '@MainActor' in message or 'MainActor' in message:
+                    category = 'main_actor'
+                    severity = 'error'  # MainActor issues can cause build errors
+                    if 'ViewModel' in message:
+                        fix = 'Add @MainActor to ViewModel class'
+                
                 issues.append(CodeIssue(
-                    severity='warning',
-                    category='syntax',
+                    severity=severity,
+                    category=category,
                     file_path=file_path,
                     line_number=None,
                     message=message,
-                    fix=None
+                    fix=fix
                 ))
         
         return issues
@@ -319,6 +334,57 @@ class ComprehensiveCodeValidator:
         
         return issues
     
+    def _check_main_actor_issues(self, file_path: str, content: str) -> List[CodeIssue]:
+        """Check for MainActor isolation issues"""
+        issues = []
+        
+        # Check ViewModels without @MainActor
+        vm_pattern = r'class\s+(\w+ViewModel)\s*:\s*ObservableObject'
+        for match in re.finditer(vm_pattern, content):
+            class_name = match.group(1)
+            # Check if @MainActor is present before this class
+            class_start = match.start()
+            prefix = content[max(0, class_start-100):class_start]
+            if '@MainActor' not in prefix:
+                issues.append(CodeIssue(
+                    severity='error',
+                    category='main_actor',
+                    file_path=file_path,
+                    line_number=None,
+                    message=f"ViewModel '{class_name}' should be marked with @MainActor for UI updates",
+                    fix='Add @MainActor before class declaration'
+                ))
+        
+        # Check for Task with UI updates not using MainActor
+        task_ui_pattern = r'Task\s*\{[^}]*?(@Published|\.text\s*=|\.isEnabled\s*=|\.opacity\s*=)[^}]*?\}'
+        if re.search(task_ui_pattern, content, re.DOTALL):
+            # Check if MainActor is used
+            if '@MainActor' not in content and 'MainActor.run' not in content:
+                issues.append(CodeIssue(
+                    severity='error',
+                    category='main_actor',
+                    file_path=file_path,
+                    line_number=None,
+                    message='Task contains UI updates but lacks MainActor isolation',
+                    fix='Add @MainActor annotation or use MainActor.run'
+                ))
+        
+        # Check for async functions updating UI without MainActor
+        async_ui_pattern = r'func\s+\w+\s*\([^)]*\)\s*async[^{]*\{[^}]*?(@Published|\.text\s*=|\.isEnabled\s*=)[^}]*?\}'
+        for match in re.finditer(async_ui_pattern, content, re.DOTALL):
+            func_text = match.group(0)
+            if '@MainActor' not in func_text:
+                issues.append(CodeIssue(
+                    severity='error',
+                    category='main_actor',
+                    file_path=file_path,
+                    line_number=None,
+                    message='Async function updates UI without @MainActor',
+                    fix='Add @MainActor to async function that updates UI'
+                ))
+        
+        return issues
+    
     def fix_issues(self, files: List[Dict[str, str]], issues: List[CodeIssue]) -> List[Dict[str, str]]:
         """Attempt to fix issues automatically"""
         fixed_files = []
@@ -337,6 +403,8 @@ class ComprehensiveCodeValidator:
                     content = self._fix_deprecated_api(content, issue)
                 elif issue.category == 'missing_import':
                     content = self._fix_missing_import(content, issue)
+                elif issue.category == 'main_actor':
+                    content = self._fix_main_actor(content, issue)
             
             fixed_files.append({
                 'path': path,
@@ -393,5 +461,43 @@ class ComprehensiveCodeValidator:
             if import_statement not in content:
                 # Add import at the beginning
                 content = f"{import_statement}\n{content}"
+        
+        return content
+    
+    def _fix_main_actor(self, content: str, issue: CodeIssue) -> str:
+        """Fix MainActor issues"""
+        # Fix ViewModels that need @MainActor
+        if 'ViewModel' in issue.message and '@MainActor' in issue.message:
+            # Find ViewModel classes without @MainActor
+            pattern = r'(class\s+\w+ViewModel\s*:\s*ObservableObject)'
+            replacement = r'@MainActor\n\1'
+            content = re.sub(pattern, replacement, content)
+        
+        # Fix Task blocks using DispatchQueue.main
+        if 'Task' in issue.message and 'DispatchQueue.main' in issue.message:
+            # Replace DispatchQueue.main.async with MainActor.run
+            content = re.sub(
+                r'DispatchQueue\.main\.async\s*\{',
+                r'await MainActor.run {',
+                content
+            )
+            
+            # Replace Task { DispatchQueue.main patterns
+            content = re.sub(
+                r'Task\s*\{([^}]*?)DispatchQueue\.main\.async\s*\{',
+                r'Task { @MainActor in\1',
+                content
+            )
+        
+        # Fix UI updates not marked with @MainActor
+        if 'UI update' in issue.message:
+            # Add @MainActor to methods that update @Published properties
+            pattern = r'(func\s+\w+[^{]*\{[^}]*@Published[^}]*\})'
+            content = re.sub(
+                pattern,
+                r'@MainActor \1',
+                content,
+                flags=re.DOTALL
+            )
         
         return content

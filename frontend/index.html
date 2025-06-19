@@ -18,6 +18,41 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+        
+        /* Typing indicator animation */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .typing-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #9CA3AF;
+            animation: typing-dot 1.4s infinite ease-in-out;
+        }
+        
+        .typing-indicator span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+        
+        .typing-indicator span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+        
+        @keyframes typing-dot {
+            0%, 80%, 100% {
+                opacity: 0.4;
+                transform: scale(0.8);
+            }
+            40% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
         .glass-morphism {
             background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(10px);
@@ -414,6 +449,7 @@
             this.isGenerating = false;
             this.generatedFiles = [];
             this.currentFileIndex = 0;
+            this.lastAction = null; // Track last action for context
             this.initializeElements();
             this.setupEventListeners();
             // Don't setup WebSocket on init - wait for project creation
@@ -650,7 +686,151 @@
                 return;
             }
             
-            // If we have an active project, always treat as modification
+            // Add typing indicator immediately for ALL requests
+            this.addTypingIndicator();
+            
+            // Flag to track if request was handled
+            let requestHandled = false;
+            
+            // Try the chat endpoint first for intelligent routing
+            try {
+                const chatResponse = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: input,
+                        project_id: this.currentProjectId,
+                        context: {
+                            just_generated: this.lastAction === 'generated',
+                            last_action: this.lastAction
+                        }
+                    })
+                });
+
+                if (chatResponse.ok) {
+                    const chatResult = await chatResponse.json();
+                    
+                    // Check if it was handled as a chat
+                    if (chatResult.type === 'chat') {
+                        this.removeTypingIndicator();
+                        this.addMessage('assistant', chatResult.response);
+                        requestHandled = true;
+                        return;
+                    }
+                    
+                    // If it's a technical response with immediate acknowledgment
+                    if (chatResult.type === 'technical' && chatResult.response) {
+                        // Remove typing indicator and show immediate acknowledgment
+                        this.removeTypingIndicator();
+                        this.addMessage('assistant', chatResult.response);
+                        
+                        // If it's a modification, we already have the project_id
+                        if (chatResult.action === 'modify' && chatResult.project_id) {
+                            this.currentProjectId = chatResult.project_id;
+                            
+                            // CRITICAL FIX: Ensure WebSocket is connected for modifications
+                            console.log('[UI] Ensuring WebSocket connection for modification:', chatResult.project_id);
+                            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                                console.log('[UI] WebSocket not connected, setting up now...');
+                                this.setupWebSocket(chatResult.project_id);
+                            } else {
+                                console.log('[UI] WebSocket already connected');
+                            }
+                            
+                            // The modification is happening in background
+                            // Show status panel for progress tracking
+                            this.statusPanel.classList.remove('hidden');
+                            this.resetStatusStages();
+                            
+                            // Update progress title for modification
+                            const progressTitle = document.getElementById('progressTitle');
+                            if (progressTitle) {
+                                progressTitle.innerHTML = '<i class="fas fa-sync-alt mr-2"></i>Modification Progress';
+                            }
+                            
+                            // Show initial status
+                            const progressText = document.getElementById('progressText');
+                            if (progressText) {
+                                progressText.textContent = 'Preparing modifications...';
+                            }
+                            
+                            // Update UI state
+                            this.isGenerating = true;
+                            this.sendBtn.disabled = true;
+                            this.sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                            
+                            // Start timer for modification
+                            this.startGenerationTimer();
+                            
+                            // WebSocket will send updates
+                            requestHandled = true;
+                            return;
+                        }
+                        
+                        // If it's generation with immediate response
+                        if (chatResult.action === 'generate' && chatResult.project_id) {
+                            // Set up the project ID
+                            this.currentProjectId = chatResult.project_id;
+                            
+                            // CRITICAL: Setup WebSocket IMMEDIATELY before anything else
+                            console.log('[UI] Setting up WebSocket IMMEDIATELY for project:', chatResult.project_id);
+                            this.setupWebSocket(chatResult.project_id);
+                            
+                            // Show status panel and start tracking
+                            this.statusPanel.classList.remove('hidden');
+                            this.resetStatusStages();
+                            
+                            // Show initial status immediately
+                            const progressText = document.getElementById('progressText');
+                            if (progressText) {
+                                progressText.textContent = 'Connecting to generation service...';
+                            }
+                            
+                            // Update UI state
+                            this.isGenerating = true;
+                            this.sendBtn.disabled = true;
+                            this.sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                            
+                            // Start timer
+                            this.startGenerationTimer();
+                            
+                            // Update progress title
+                            const progressTitle = document.getElementById('progressTitle');
+                            if (progressTitle) {
+                                progressTitle.innerHTML = '<i class="fas fa-tasks mr-2"></i>Generation Progress';
+                            }
+                            
+                            // IMPORTANT: Return here to prevent duplicate API call
+                            requestHandled = true;
+                            return;
+                        }
+                    }
+                    
+                    // If it's a technical response (generation/modification started)
+                    if (chatResult.project_id) {
+                        // Continue with existing flow
+                        this.currentProjectId = chatResult.project_id;
+                        // Let the existing code below handle the technical flow
+                    }
+                }
+            } catch (error) {
+                console.log('Chat endpoint error:', error);
+                // Don't fall through to direct API calls if we already handled the request
+                if (this.currentProjectId && this.isGenerating) {
+                    console.log('Already processing, not falling back to direct API');
+                    return;
+                }
+            }
+
+            // Fallback to existing behavior if chat endpoint fails or doesn't handle it
+            // ONLY if the request wasn't already handled
+            if (requestHandled) {
+                console.log('Request already handled, not running fallback code');
+                return;
+            }
+            
             if (this.currentProjectId) {
                 // Skip question detection - treat as modification
             } else {
@@ -688,38 +868,18 @@
                     : '<i class="fas fa-tasks mr-2"></i>Generation Progress';
             }
             
+            // Initialize the progress text to show we're starting
+            const progressText = document.getElementById('progressText');
+            if (progressText) {
+                progressText.textContent = 'Starting...';
+                console.log('[UI] Initialized progressText to "Starting..."');
+            }
+            
             // Start timer
             this.startGenerationTimer();
 
-            // Add typing indicator temporarily
-            this.addTypingIndicator();
-            
-            // After a short delay, replace typing with initial status
-            setTimeout(() => {
-                this.removeTypingIndicator();
-                
-                // Add a subtle initial status that will be updated
-                const initialStatusDiv = document.createElement('div');
-                initialStatusDiv.id = 'currentStatusLineContainer';
-                initialStatusDiv.className = 'chat-message';
-                initialStatusDiv.innerHTML = `
-                    <div class="flex items-start space-x-3">
-                        <div class="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
-                            <i class="fas fa-robot text-white text-sm"></i>
-                        </div>
-                        <div class="flex-1 max-w-md">
-                            <div id="currentStatusLine" class="bg-gray-800/30 px-4 py-2 rounded-xl rounded-tl-none border border-gray-700/50 transition-all duration-300">
-                                <div class="text-sm text-gray-400 flex items-center">
-                                    <i class="fas fa-circle-notch fa-spin text-gray-500 mr-2"></i>
-                                    <span id="progressText">Getting ready...</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                this.chatMessages.appendChild(initialStatusDiv);
-                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
-            }, 300); // Show typing briefly then transition to status
+            // Typing indicator is already added at the start of handleSubmit
+            // It will be removed when we get a response
 
             try {
                 // Determine if this is a modification or new generation
@@ -787,10 +947,14 @@
                 if (response.ok && result.project_id) {
                     this.currentProjectId = result.project_id;
                     
-                    // WebSocket should already be connected for new projects
-                    // Only setup if modifying and not already connected
+                    // Always ensure WebSocket is connected with the project ID
                     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                        console.log('[UI] Setting up WebSocket for project:', result.project_id);
                         this.setupWebSocket(result.project_id);
+                        // Very short delay for connection
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    } else {
+                        console.log('[UI] WebSocket already connected');
                     }
                     
                     this.removeTypingIndicator();
@@ -802,6 +966,7 @@
                         
                         if (isModification) {
                             // Show modification success message
+                            this.lastAction = 'modified';
                             let detailMessage = `✅ I've successfully modified **${result.app_name}**!\n\n`;
                             
                             if (result.changes_made && Array.isArray(result.changes_made) && result.changes_made.length > 0) {
@@ -821,6 +986,7 @@
                             this.addMessage('assistant', detailMessage);
                         } else {
                             // Show creation success message
+                            this.lastAction = 'generated';
                             let detailMessage = `🎉 I've successfully created **${result.app_name}**!\n\n`;
                             
                             if (result.features && result.features.length > 0) {
@@ -967,9 +1133,24 @@
             const progressText = document.getElementById('progressText');
             if (progressText) {
                 console.log('[UI] Updating progressText with:', message);
+                console.log('[UI] progressText before update:', progressText.textContent);
                 progressText.textContent = message;
+                console.log('[UI] progressText after update:', progressText.textContent);
+                
+                // Force a repaint to ensure the update is visible
+                progressText.style.display = 'none';
+                progressText.offsetHeight; // Trigger reflow
+                progressText.style.display = '';
             } else {
                 console.error('[UI] progressText element not found!');
+                // Try to find it again in case it was added dynamically
+                setTimeout(() => {
+                    const retryProgressText = document.getElementById('progressText');
+                    if (retryProgressText) {
+                        console.log('[UI] Found progressText on retry');
+                        retryProgressText.textContent = message;
+                    }
+                }, 100);
             }
             
             const currentStatusMessage = document.querySelector('#currentStatusMessage p');
@@ -1041,52 +1222,11 @@
                 isDifferentMessage
             });
             
-            // Show updates if it's important, different, or enough time has passed
+            // Status is now only shown in the dedicated status panel, not in chat
+            // This prevents duplicate status messages
             if (isImportantStatus || isFinalMessage || isBuildingPhase || isDifferentStatus || isDifferentMessage || timeSinceLastStatus > 300) {
-                // Update or create a single status line instead of multiple messages
-                let statusElement = document.getElementById('currentStatusLine');
-                
-                if (!statusElement) {
-                    // Create a subtle status line
-                    const statusDiv = document.createElement('div');
-                    statusDiv.id = 'currentStatusLineContainer';
-                    statusDiv.className = 'chat-message';
-                    statusDiv.innerHTML = `
-                        <div class="flex items-start space-x-3">
-                            <div class="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
-                                <i class="fas fa-robot text-white text-sm"></i>
-                            </div>
-                            <div class="flex-1 max-w-md">
-                                <div id="currentStatusLine" class="bg-gray-800/30 px-4 py-2 rounded-xl rounded-tl-none border border-gray-700/50 transition-all duration-300">
-                                    <div class="text-sm text-gray-400 flex items-center">
-                                        <i class="${this.getStatusIcon(status)} mr-2"></i>
-                                        <span>${message}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    this.chatMessages.appendChild(statusDiv);
-                } else {
-                    // Update existing status line with smooth transition
-                    console.log('[UI] Updating existing status line with:', message);
-                    statusElement.innerHTML = `
-                        <div class="text-sm text-gray-400 flex items-center">
-                            <i class="${this.getStatusIcon(status)} mr-2"></i>
-                            <span>${message}</span>
-                        </div>
-                    `;
-                    
-                    // Add subtle pulse animation for updates
-                    statusElement.classList.add('animate-pulse');
-                    setTimeout(() => statusElement.classList.remove('animate-pulse'), 1000);
-                }
-                
-                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
                 this.lastStatusShown = { status, message, timestamp: now };
-                console.log('[UI] Status line updated successfully:', message);
-            } else {
-                console.log('[UI] Status update skipped due to filtering conditions');
+                console.log('[UI] Status panel updated, chat updates disabled to prevent duplicates');
             }
             
             // Add to detailed status with color coding
@@ -1321,9 +1461,21 @@
                 // Show success modal
                 this.successModal.classList.remove('hidden');
 
-                // Update final message
-                const message = data.message || '🎉 Your app is now running in the iOS Simulator! You can continue to request modifications or create a new app.';
-                this.addMessage('assistant', message);
+                // Update final message - use the actual message from backend which includes simulator status
+                if (data.message) {
+                    this.addMessage('assistant', data.message);
+                } else {
+                    // Fallback message if backend doesn't send one
+                    const defaultMessage = data.simulator_launched 
+                        ? '🎉 Your app is now running in the iOS Simulator! You can continue to request modifications or create a new app.'
+                        : '✅ Your app has been built successfully! Please launch it manually in the iOS Simulator. You can continue to request modifications or create a new app.';
+                    this.addMessage('assistant', defaultMessage);
+                }
+                
+                // Show simplified next steps if provided
+                if (data.next_steps) {
+                    this.addMessage('assistant', data.next_steps);
+                }
 
                 // Update all stages to complete
                 const stages = ['design', 'implement', 'validate', 'build', 'fix', 'launch'];
@@ -1331,10 +1483,17 @@
                     this.updateStatusStage(stage, 'complete');
                 });
 
-                // Add success status
-                const statusMessage = isModification 
-                    ? '✅ Modifications applied and app relaunched!' 
-                    : '✅ App launched successfully in iOS Simulator!';
+                // Add success status based on whether simulator actually launched
+                let statusMessage;
+                if (data.simulator_launched) {
+                    statusMessage = isModification 
+                        ? '✅ Modifications applied and app relaunched!' 
+                        : '✅ App launched successfully in iOS Simulator!';
+                } else {
+                    statusMessage = isModification 
+                        ? '✅ Modifications applied! Please launch the app manually in the simulator.' 
+                        : '✅ App built successfully! Please launch the app manually in the simulator.';
+                }
                 this.updateStatus(statusMessage, 'success');
                 
                 // Enable the chat input for modifications

@@ -164,7 +164,7 @@ class SimulatorService:
         raise SimulatorError("All installation strategies failed")
 
     async def launch_app(self, device_udid: str, bundle_id: str) -> bool:
-        """Launch app with proper error handling"""
+        """Launch app - simple and reliable"""
         for attempt in range(self._retry_attempts):
             try:
                 self.logger.info(f"Launching {bundle_id} (attempt {attempt + 1})")
@@ -184,14 +184,13 @@ class SimulatorService:
                 )
 
                 if result.returncode == 0:
-                    self.logger.info(f"Successfully launched {bundle_id}")
+                    self.logger.info(f"Launch command succeeded for {bundle_id}")
+                    # Bring Simulator to foreground
+                    await self._bring_simulator_to_foreground()
+                    # Success - app launched
                     return True
-                    
-                # Even if launch command fails, check if app is running
-                await asyncio.sleep(1)
-                if await self.is_app_running(device_udid, bundle_id):
-                    self.logger.info(f"App {bundle_id} is running despite launch command issues")
-                    return True
+                else:
+                    self.logger.warning(f"Launch command failed with code {result.returncode}: {result.stderr}")
 
             except Exception as e:
                 self.logger.warning(f"Launch attempt {attempt + 1} failed: {e}")
@@ -249,21 +248,31 @@ class SimulatorService:
             if status_callback:
                 await status_callback("✅ App installed successfully!")
             
-            # Check if app is already running (iOS often auto-launches after install)
-            await asyncio.sleep(2)  # Give iOS time to auto-launch
+            # Always try to launch the app after installation
+            # The is_app_running check is unreliable due to JSON parsing issues
+            await asyncio.sleep(1)  # Brief pause after install
             
-            if await self.is_app_running(device.udid, bundle_id):
-                self.logger.info(f"App {bundle_id} is already running (auto-launched by iOS)")
-                if status_callback:
-                    await status_callback("✅ App is already running!")
-            else:
-                # Launch the app only if not running
-                if status_callback:
-                    await status_callback("🚀 Launching app...")
-                
+            # Launch the app (removed unreliable is_running check)
+            if status_callback:
+                await status_callback("🚀 Launching app...")
+            
+            self.logger.info(f"Attempting to launch {bundle_id} on device {device.udid}")
+            launch_success = await self.launch_app(device.udid, bundle_id)
+            
+            if not launch_success:
+                # Try one more time with a longer delay
+                self.logger.warning("First launch attempt failed, retrying...")
+                await asyncio.sleep(3)
                 launch_success = await self.launch_app(device.udid, bundle_id)
-                if not launch_success:
-                    return False, "Failed to launch app"
+            
+            if not launch_success:
+                self.logger.error(f"Failed to launch {bundle_id} after retries")
+                return False, "Failed to launch app after multiple attempts"
+            
+            self.logger.info(f"Successfully launched {bundle_id}")
+            
+            # Bring Simulator to foreground after successful launch
+            await self._bring_simulator_to_foreground()
             
             return True, f"App launched successfully on {device.name}"
             
@@ -312,17 +321,46 @@ class SimulatorService:
             )
             if result.returncode == 0 and result.stdout:
                 import json
-                apps_data = json.loads(result.stdout)
-                for app_id, app_info in apps_data.items():
-                    if app_id == bundle_id:
-                        # Check if app has a process ID (meaning it's running)
-                        return app_info.get("ProcessID", 0) > 0
+                try:
+                    # Try to parse the JSON output
+                    apps_data = json.loads(result.stdout)
+                    for app_id, app_info in apps_data.items():
+                        if app_id == bundle_id:
+                            # Check if app has a process ID (meaning it's running)
+                            process_id = app_info.get("ProcessID", 0)
+                            if process_id > 0:
+                                self.logger.debug(f"App {bundle_id} is running with PID {process_id}")
+                                return True
+                            else:
+                                self.logger.debug(f"App {bundle_id} found but not running (no PID)")
+                                return False
+                    self.logger.debug(f"App {bundle_id} not found in installed apps")
+                except json.JSONDecodeError as e:
+                    # If JSON parsing fails, we can't reliably check if app is running
+                    self.logger.warning(f"JSON parse error: {e}")
+                    # Return False to trigger actual launch
+                    return False
             return False
         except Exception as e:
             self.logger.warning(f"Failed to check if app is running: {e}")
+            # Don't assume app is not running if check fails
             return False
 
     # Private helper methods
+    
+    async def _bring_simulator_to_foreground(self):
+        """Bring the iOS Simulator app to the foreground"""
+        try:
+            # Use AppleScript to activate the Simulator app
+            script = 'tell application "Simulator" to activate'
+            await self._run_command(
+                ["osascript", "-e", script],
+                check=False,
+                timeout=5
+            )
+            self.logger.debug("Brought Simulator app to foreground")
+        except Exception as e:
+            self.logger.debug(f"Could not bring Simulator to foreground: {e}")
 
     async def _run_command(self, cmd: List[str], timeout: int = 30, check: bool = True) -> subprocess.CompletedProcess:
         """Run command with timeout and logging"""

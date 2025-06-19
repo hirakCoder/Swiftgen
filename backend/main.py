@@ -128,6 +128,17 @@ advanced_generator = AdvancedAppGenerator(
     llm_service=enhanced_service
 )
 
+# Initialize LLM Chat Handler
+llm_chat_handler = None
+try:
+    from llm_chat_handler import LLMChatHandler
+    llm_chat_handler = LLMChatHandler(enhanced_service)
+    print("✓ LLM Chat Handler initialized for conversational interactions")
+except ImportError:
+    print("Warning: llm_chat_handler.py not found. Conversational chat disabled.")
+except Exception as e:
+    print(f"Warning: Failed to initialize LLM Chat Handler: {e}")
+
 # Store active connections and project contexts
 active_connections: dict = {}
 project_contexts: dict = {}
@@ -152,6 +163,11 @@ generation_stats = {
 class ModifyRequest(BaseModel):
     project_id: str
     modification: str
+    context: Optional[Dict] = None
+
+class ChatRequest(BaseModel):
+    message: str
+    project_id: Optional[str] = None
     context: Optional[Dict] = None
 
 def extract_app_name_from_description(description: str, fallback: str = None) -> str:
@@ -274,7 +290,26 @@ async def serve_editor():
     return HTMLResponse(content=html_content)
 
 def _generate_next_steps_checklist(app_complexity: str, app_type: str, features: List[str]) -> str:
-    """Generate a contextual next steps checklist based on app type and features"""
+    """Generate simple, actionable next steps (2-3 items only)"""
+    
+    # Import simplified next steps generator
+    try:
+        from simplified_next_steps import generate_simplified_next_steps
+        return generate_simplified_next_steps(app_type, is_modification=False)
+    except:
+        # Fallback if import fails
+        pass
+    
+    # Simple fallback
+    checklist = "\n\n💡 **What would you like to do next?**\n"
+    checklist += "• Test your app in the iOS Simulator\n"
+    checklist += "• Add a new feature or customize the design\n"
+    checklist += "• Ask me to modify something specific"
+    
+    return checklist
+
+def _generate_next_steps_checklist_old(app_complexity: str, app_type: str, features: List[str]) -> str:
+    """DEPRECATED: Old comprehensive checklist - kept for reference"""
     
     checklist = "\n\n🚀 **Next Steps to Make Your App Production-Ready:**\n"
     
@@ -468,34 +503,37 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
     generation_start_time = datetime.now()
     
     try:
-        # Extract app name
+        # Extract app name using LLM first, fallback to regex
         if request.app_name and request.app_name != "MyApp":
             app_name = request.app_name
         else:
-            app_name = extract_app_name_from_description(request.description)
+            # Try LLM extraction first
+            llm_app_name = await enhanced_service.extract_app_name(request.description)
+            if llm_app_name:
+                app_name = llm_app_name
+                print(f"[MAIN] LLM extracted app name: {app_name}")
+            else:
+                # Fallback to regex extraction
+                app_name = extract_app_name_from_description(request.description)
+                print(f"[MAIN] Regex extracted app name: {app_name}")
 
         print(f"\n[MAIN] Generating UNIQUE app: {app_name}")
         print(f"[MAIN] Description: {request.description}")
         print(f"[MAIN] Using LLM selection for optimal results")
 
-        # Send immediate status update
+        # Send immediate status update without delay
         await notify_clients(project_id, {
             "type": "status",
             "message": f"🚀 Starting to create {app_name}...",
             "status": "initializing"
         })
         
-        # Small delay to ensure WebSocket is connected
-        await asyncio.sleep(0.2)
-        
-        # Send another update to ensure UI is responsive
+        # Quick follow-up to show progress
         await notify_clients(project_id, {
             "type": "status", 
             "message": f"📋 Preparing workspace for {app_name}...",
             "status": "initializing"
         })
-        
-        await asyncio.sleep(0.1)
 
         # Update status with more details
         await notify_clients(project_id, {
@@ -1001,6 +1039,14 @@ async def modify_app(request: ModifyRequest):
         # Use current state files
         files_to_modify = current_state.get("current_files", context.get("generated_files", []))
 
+        # Send immediate status updates like generation flow
+        await notify_clients(project_id, {
+            "type": "status",
+            "message": f"🚀 Starting to modify {app_name}...",
+            "status": "initializing",
+            "app_name": app_name
+        })
+        
         await notify_clients(project_id, {
             "type": "status",
             "message": "🔍 AI is analyzing your modification request...",
@@ -1008,6 +1054,14 @@ async def modify_app(request: ModifyRequest):
             "app_name": app_name
         })
 
+        # Send status before generation
+        await notify_clients(project_id, {
+            "type": "status",
+            "message": "🎨 Generating code modifications...",
+            "status": "generating",
+            "app_name": app_name
+        })
+        
         # Generate modified code with INTELLIGENCE
         try:
             # Check if the method exists, otherwise fall back
@@ -1158,6 +1212,12 @@ Return a JSON response with the modified files and changes made."""
         # Validate modifications
         await notify_clients(project_id, {
             "type": "status",
+            "message": "✅ Code modifications generated successfully!",
+            "status": "generated"
+        })
+        
+        await notify_clients(project_id, {
+            "type": "status",
             "message": "🔍 Ensuring modification quality...",
             "status": "validating"
         })
@@ -1191,6 +1251,13 @@ Return a JSON response with the modified files and changes made."""
                 "success": False,
                 "errors": validation_errors
             }
+            
+            # Send healing status
+            await notify_clients(project_id, {
+                "type": "status",
+                "message": "🔧 AI is fixing validation issues...",
+                "status": "healing"
+            })
 
             healed = await self_healing_generator._apply_healing(
                 modified_code,
@@ -1306,6 +1373,13 @@ Return a JSON response with the modified files and changes made."""
                 "project_id": project_id
             })
 
+            # Generate simple next steps for modifications
+            try:
+                from simplified_next_steps import generate_simplified_next_steps
+                next_steps = generate_simplified_next_steps(app_type="", is_modification=True)
+            except:
+                next_steps = "\n💡 **What would you like to do next?**\n• Test the changes in the iOS Simulator\n• Make another modification\n• Add a new feature"
+            
             return {
                 "project_id": project_id,
                 "bundle_id": bundle_id,
@@ -1316,6 +1390,7 @@ Return a JSON response with the modified files and changes made."""
                 "files": modified_code.get("files", []),  # Include for frontend
                 "modification_summary": modification_summary,
                 "modified_by_llm": llm_used,
+                "next_steps": next_steps,
             }
         else:
             await notify_clients(project_id, {
@@ -1344,6 +1419,184 @@ Return a JSON response with the modified files and changes made."""
             "project_id": project_id,
             "status": "failed", 
             "message": f"Modification failed: {str(e)}",
+            "error": str(e)
+        }
+
+async def _modify_app_background(project_id: str, modification: str, context: dict = None):
+    """Background task to handle app modification"""
+    try:
+        # CRITICAL FIX: Add a small delay to ensure WebSocket is ready
+        # This gives the frontend time to set up properly after the immediate response
+        await asyncio.sleep(0.5)
+        
+        # Send immediate status update to confirm WebSocket is working
+        await notify_clients(project_id, {
+            "type": "status",
+            "message": "🔄 Starting modification process...",
+            "status": "initializing"
+        })
+        
+        modify_request = ModifyRequest(
+            project_id=project_id,
+            modification=modification,
+            context=context
+        )
+        # This will handle the modification and send WebSocket updates
+        await modify_app(modify_request)
+    except Exception as e:
+        print(f"[CHAT] Error in background modification: {e}")
+        # Send error via WebSocket if possible
+        await notify_clients(project_id, {
+            "type": "error",
+            "message": f"Failed to modify app: {str(e)}"
+        })
+
+@app.post("/api/chat")
+async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
+    """Handle chat interactions with intelligent routing"""
+    try:
+        # Check if we have LLM chat handler available
+        if llm_chat_handler:
+            # Prepare context for LLM
+            chat_context = {
+                'has_active_project': request.project_id is not None,
+                'just_generated': request.context.get('just_generated', False) if request.context else False,
+                'last_action': request.context.get('last_action') if request.context else None
+            }
+            
+            # Let LLM handle the message first
+            llm_response = await llm_chat_handler.handle_message(
+                request.message,
+                chat_context
+            )
+            
+            if llm_response:
+                # LLM handled it conversationally
+                return {
+                    "response": llm_response,
+                    "type": "chat",
+                    "status": "success"
+                }
+        
+        # If LLM didn't handle it or isn't available, check if it's a technical request
+        # This maintains backward compatibility
+        message_lower = request.message.lower()
+        
+        # Check if this is a modification request (has active project)
+        if request.project_id:
+            # Generate a more contextual immediate response
+            app_name = request.context.get('app_name', 'your app') if request.context else 'your app'
+            
+            # Analyze the modification request to provide better feedback
+            mod_lower = request.message.lower()
+            if 'add' in mod_lower:
+                action = "add that feature to"
+            elif 'change' in mod_lower or 'modify' in mod_lower:
+                action = "make those changes to"
+            elif 'fix' in mod_lower:
+                action = "fix that issue in"
+            elif 'remove' in mod_lower or 'delete' in mod_lower:
+                action = "remove that from"
+            else:
+                action = "update"
+            
+            immediate_response = f"Perfect! I'll {action} {app_name} right away. You'll see the progress below..."
+            
+            # Start modification in background
+            background_tasks.add_task(
+                _modify_app_background,
+                request.project_id,
+                request.message,
+                request.context
+            )
+            
+            return {
+                "response": immediate_response,
+                "type": "technical",
+                "status": "processing",
+                "project_id": request.project_id,
+                "action": "modify"
+            }
+        
+        # Check if this is a generation request
+        generation_keywords = ['create', 'build', 'make', 'generate', 'develop', 'app']
+        if any(keyword in message_lower for keyword in generation_keywords):
+            # Extract app name for immediate response
+            # Try LLM extraction first for better names
+            try:
+                llm_app_name = await enhanced_service.extract_app_name(request.message)
+                app_name = llm_app_name if llm_app_name else extract_app_name_from_description(request.message)
+            except:
+                app_name = extract_app_name_from_description(request.message)
+            
+            # Generate contextual response based on app type
+            desc_lower = request.message.lower()
+            if 'game' in desc_lower:
+                excitement = "🎮 Awesome! A game app!"
+            elif 'social' in desc_lower:
+                excitement = "🌐 Great choice! Social apps are popular!"
+            elif 'fitness' in desc_lower or 'health' in desc_lower:
+                excitement = "💪 Perfect! Health apps help people stay fit!"
+            elif 'food' in desc_lower or 'delivery' in desc_lower:
+                excitement = "🍕 Yum! Food apps are always in demand!"
+            else:
+                excitement = "✨ Excellent idea!"
+                
+            immediate_response = f"{excitement} I'll create {app_name} for you right now. Watch the progress below..."
+            
+            # Create a GenerateRequest and delegate to generate_app
+            generate_request = GenerateRequest(
+                description=request.message,
+                ios_version="16.0",  # Default iOS version
+                project_id=None
+            )
+            
+            # Create project_id first
+            project_id = f"proj_{uuid.uuid4().hex[:8]}"
+            
+            # Store the request for the background task
+            generate_request.project_id = project_id
+            
+            # Add a wrapper to delay the background task slightly
+            async def delayed_generate():
+                # Give frontend 0.5 seconds to connect WebSocket
+                await asyncio.sleep(0.5)
+                await _generate_app_async(project_id, generate_request)
+            
+            # Start generation in background with delay
+            background_tasks.add_task(delayed_generate)
+            
+            # Return immediately with project_id so frontend can connect WebSocket
+            return {
+                'response': immediate_response,
+                'type': 'technical', 
+                'action': 'generate',
+                'project_id': project_id,
+                'app_name': app_name,
+                'status': 'processing'
+            }
+        
+        # Fallback response if no handler matched
+        fallback_response = "I'm SwiftGen AI! I can help you create amazing iOS apps. Just describe what you'd like to build, and I'll generate the complete Swift code for you!"
+        if llm_chat_handler:
+            fallback_response = llm_chat_handler.get_error_response('invalid_input')
+            
+        return {
+            "response": fallback_response,
+            "type": "chat",
+            "status": "success"
+        }
+        
+    except Exception as e:
+        print(f"Error in chat endpoint: {str(e)}")
+        error_response = "Something went wrong, but I'm still here! What iOS app would you like to create?"
+        if llm_chat_handler:
+            error_response = llm_chat_handler.get_error_response('server_error')
+            
+        return {
+            "response": error_response,
+            "type": "error",
+            "status": "error",
             "error": str(e)
         }
 

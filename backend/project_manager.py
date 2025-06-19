@@ -26,6 +26,38 @@ class ProjectManager:
         self.max_files = 10  # Prevent overly complex apps
         self.min_content_size = 100  # Ensure files have real content
 
+    def _sanitize_display_name(self, name: str) -> str:
+        """Sanitize display name to remove problematic characters while keeping it readable"""
+        # Remove special characters that cause build issues
+        sanitized = name.replace('?', '')
+        sanitized = sanitized.replace('!', '')
+        sanitized = sanitized.replace('@', ' at ')
+        sanitized = sanitized.replace('#', '')
+        sanitized = sanitized.replace('$', '')
+        sanitized = sanitized.replace('%', ' percent ')
+        sanitized = sanitized.replace('^', '')
+        sanitized = sanitized.replace('&', ' and ')
+        sanitized = sanitized.replace('*', '')
+        sanitized = sanitized.replace('(', '')
+        sanitized = sanitized.replace(')', '')
+        sanitized = sanitized.replace('[', '')
+        sanitized = sanitized.replace(']', '')
+        sanitized = sanitized.replace('{', '')
+        sanitized = sanitized.replace('}', '')
+        sanitized = sanitized.replace('|', '')
+        sanitized = sanitized.replace('\\', '')
+        sanitized = sanitized.replace('/', ' ')
+        sanitized = sanitized.replace('<', '')
+        sanitized = sanitized.replace('>', '')
+        sanitized = sanitized.replace(',', '')
+        sanitized = sanitized.replace(';', '')
+        sanitized = sanitized.replace(':', '')
+        sanitized = sanitized.replace('"', '')
+        sanitized = sanitized.replace("'", '')
+        # Clean up multiple spaces and trim
+        sanitized = ' '.join(sanitized.split())
+        return sanitized.strip()
+
     def _create_safe_bundle_id(self, app_name: str) -> str:
         """Create a safe bundle ID from app name"""
         # CRITICAL: Remove spaces first
@@ -156,10 +188,13 @@ class ProjectManager:
 
         # CRITICAL: Sanitize app name immediately
         if app_name:
-            display_name = app_name  # Keep original for display/UI
+            # Sanitize display name to remove problematic characters
+            display_name = self._sanitize_display_name(app_name)
             safe_app_name = re.sub(r'[^a-zA-Z0-9]', '', app_name)
         else:
-            display_name = generated_code.get("app_name", "MyApp")
+            raw_name = generated_code.get("app_name", "MyApp")
+            # Sanitize display name to remove problematic characters
+            display_name = self._sanitize_display_name(raw_name)
             safe_app_name = re.sub(r'[^a-zA-Z0-9]', '', display_name)
 
         # Create all safe names upfront
