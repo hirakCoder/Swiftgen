@@ -91,6 +91,19 @@
 
 ---
 
+## Critical Pattern Recognition (Dec 19, 2024)
+
+### The Vicious Cycle
+1. **Issue appears** → Add fix → Seems to work → Issue returns → Add another fix
+2. **Never found root cause** → Fixes pile up → System becomes fragile
+3. **Same issues keep returning** → Because we treat symptoms, not disease
+
+### Why Modifications Degrade
+- **Works initially** (2-3 modifications)
+- **Then fails consistently**
+- **Classic sign of**: Memory leak, state accumulation, or context growth
+- **We keep adding validators** instead of finding what's leaking
+
 ## Lessons Learned
 
 ### 1. Validation Gaps

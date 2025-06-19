@@ -1282,6 +1282,7 @@ Return a JSON response with the modified files and changes made."""
         if "modifications" not in context:
             context["modifications"] = []
             
+        # Keep only last 3 modifications to prevent context explosion
         context["modifications"].append({
             "request": request.modification,
             "timestamp": datetime.now().isoformat(),
@@ -1289,6 +1290,10 @@ Return a JSON response with the modified files and changes made."""
             "modified_by_llm": llm_used,
             "version": project_state[project_id]["version"]
         })
+        
+        # CRITICAL: Limit modification history to prevent context growth
+        if len(context["modifications"]) > 3:
+            context["modifications"] = context["modifications"][-3:]
 
         project_contexts[project_id] = context
 
