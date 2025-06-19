@@ -84,6 +84,17 @@ CRITICAL SYNTAX RULES - MUST FOLLOW:
     - For iOS 16 target, use the single parameter version
     - NEVER use the iOS 17+ two-parameter version for iOS 16 apps
 
+22. SWIFTUI MODIFIER SYNTAX - CRITICAL:
+    - .transition() can ONLY be applied to Views, not to closing braces
+    - .fill() is ONLY for Shape types (Rectangle, Circle, etc), NOT for modifiers
+    - Color references must use Color prefix: Color.gray NOT .gray
+    - Shapes MUST have .fill() before other modifiers like .shadow()
+    - WRONG: RoundedRectangle().shadow().fill() 
+    - RIGHT: RoundedRectangle().fill(Color.white).shadow()
+    - WRONG: }.transition(.scale)
+    - RIGHT: SomeView().transition(.scale)
+    - View.transition is NOT valid - use on instance not type
+
 MODERN PATTERN EXAMPLES:
 // ✅ CORRECT - NavigationStack
 NavigationStack {

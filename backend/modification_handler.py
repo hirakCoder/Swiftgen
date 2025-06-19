@@ -7,6 +7,13 @@ import re
 from typing import List, Dict, Tuple, Optional
 from difflib import unified_diff
 
+# Import UI enhancement handler
+try:
+    from ui_enhancement_handler import UIEnhancementHandler
+    ui_handler = UIEnhancementHandler()
+except ImportError:
+    ui_handler = None
+
 class ModificationHandler:
     """Handles the modification process to ensure changes are applied correctly"""
     
@@ -68,7 +75,9 @@ Return JSON with ALL {len(files)} files:
         request_lower = modification_request.lower()
         
         # Keywords that suggest which files to modify
-        ui_keywords = ['color', 'background', 'button', 'text', 'view', 'ui', 'interface', 'display', 'show']
+        ui_keywords = ['color', 'background', 'button', 'text', 'view', 'ui', 'ux', 'interface', 
+                      'display', 'show', 'fancy', 'interactive', 'animation', 'style', 'theme',
+                      'design', 'visual', 'appearance', 'look', 'feel', 'gradient', 'shadow']
         model_keywords = ['data', 'model', 'property', 'field', 'attribute']
         logic_keywords = ['function', 'method', 'logic', 'behavior', 'action', 'functionality']
         
@@ -183,22 +192,30 @@ Return JSON with ALL {len(files)} files:
     
     def _fix_escape_sequences(self, text: str) -> str:
         """Fix invalid escape sequences"""
-        # Replace invalid escapes with valid ones
-        text = text.replace('\\n', '\\\\n')
-        text = text.replace('\\t', '\\\\t')
-        text = text.replace('\\"', '\\\\"')
+        # First, handle the content inside Swift code strings more carefully
+        # Look for patterns like "content": "...Swift code..."
         
-        # Handle actual newlines in strings
-        # This is a complex regex that finds strings and fixes their content
-        def fix_string_content(match):
-            content = match.group(1)
-            # Replace actual newlines with \n
+        def fix_swift_code_content(match):
+            key = match.group(1)
+            content = match.group(2)
+            
+            # For Swift code content, we need to escape properly
+            # Replace backslashes that aren't already escaped
+            content = re.sub(r'(?<!\\)\\(?![\\"])', r'\\\\', content)
+            
+            # Replace newlines with proper escape
             content = content.replace('\n', '\\n')
+            content = content.replace('\r', '\\r')
             content = content.replace('\t', '\\t')
-            return f'"{content}"'
+            
+            # Ensure quotes are escaped
+            content = re.sub(r'(?<!\\)"', r'\\"', content)
+            
+            return f'"{key}": "{content}"'
         
-        # Find strings and fix them
-        text = re.sub(r'"([^"]*)"', fix_string_content, text)
+        # Apply fix to content fields
+        text = re.sub(r'"(content|path)"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', 
+                     fix_swift_code_content, text, flags=re.DOTALL)
         
         return text
     
@@ -269,6 +286,30 @@ Return JSON with ALL {len(files)} files:
                                   modification_request: str) -> Dict:
         """Create a minimal modification response when LLM fails"""
         
+        # Check if this is a UI/UX enhancement request
+        modification_lower = modification_request.lower()
+        is_ui_request = any(keyword in modification_lower for keyword in 
+                          ['ui', 'ux', 'fancy', 'interactive', 'design', 'visual', 
+                           'color', 'animation', 'style', 'improve', 'better', 'modern'])
+        
+        if is_ui_request and ui_handler:
+            print(f"[MODIFICATION] UI request detected, applying automatic enhancements")
+            enhanced_files = ui_handler.enhance_ui_in_files(original_files, modification_request)
+            
+            # Get list of modified files
+            modified_files = [f['path'] for f in enhanced_files if f.get('modified', False)]
+            
+            # Get enhancement summary
+            changes_made = ui_handler.create_enhancement_summary(enhanced_files)
+            
+            # Return enhanced files
+            return {
+                "files": [{'path': f['path'], 'content': f['content']} for f in enhanced_files],
+                "modification_summary": "Applied UI/UX enhancements for a more modern and interactive experience",
+                "changes_made": changes_made,
+                "files_modified": modified_files if modified_files else ["All View files enhanced"]
+            }
+        
         # Return all files unchanged as a fallback
         return {
             "files": original_files,
@@ -276,3 +317,22 @@ Return JSON with ALL {len(files)} files:
             "changes_made": ["No changes applied due to processing error"],
             "files_modified": []
         }
+    
+    def validate_and_fix_swift_syntax(self, files: List[Dict]) -> List[Dict]:
+        """Validate and fix common SwiftUI syntax errors in all files"""
+        if not ui_handler:
+            return files
+            
+        fixed_files = []
+        for file in files:
+            if file['path'].endswith('.swift'):
+                # Apply syntax fixes
+                content = ui_handler._fix_common_syntax_errors(file['content'])
+                fixed_files.append({
+                    'path': file['path'],
+                    'content': content
+                })
+            else:
+                fixed_files.append(file)
+        
+        return fixed_files

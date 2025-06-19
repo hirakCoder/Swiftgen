@@ -1,380 +1,246 @@
 """
-Complex App Architect for SwiftGen AI
-Plans and structures complex applications before generation to ensure success
+Complex App Architect - Orchestrates generation of complex multi-user apps
 """
 
-import re
-from typing import Dict, List, Optional, Tuple
+import logging
+from typing import Dict, List, Any, Optional, Tuple
+from dataclasses import dataclass
+from complex_app_templates import ComplexAppTemplates, AppType, UserRole
 
+logger = logging.getLogger(__name__)
+
+@dataclass
+class ComplexAppSpec:
+    """Specification for a complex app"""
+    app_type: AppType
+    app_name: str
+    user_roles: List[UserRole]
+    core_features: List[str]
+    screens: Dict[UserRole, List[str]]
+    models: List[str]
+    
 class ComplexAppArchitect:
-    """Architect for planning complex app structures before generation"""
+    """Orchestrates the generation of complex iOS apps"""
     
     def __init__(self):
-        # Define app complexity patterns
-        self.complexity_indicators = {
-            "high": [
-                "delivery", "uber", "doordash", "ecommerce", "marketplace",
-                "social media", "instagram", "facebook", "twitter",
-                "banking", "finance", "trading", "healthcare", "medical"
-            ],
-            "medium": [
-                "todo", "notes", "calendar", "weather", "news",
-                "recipe", "fitness", "habit", "budget", "expense"
-            ],
-            "low": [
-                "calculator", "timer", "counter", "converter",
-                "flashcard", "quiz", "dice", "coin"
-            ]
-        }
+        self.templates = ComplexAppTemplates()
         
-        # Define required components for complex apps
-        self.app_requirements = {
-            "ride_sharing": {
-                "models": [
-                    "User", "Driver", "Ride", "Location", "Vehicle",
-                    "Payment", "Rating", "Route", "Fare"
-                ],
-                "views": [
-                    "ContentView", "MapView", "RideRequestView", "DriverView",
-                    "RideTrackingView", "PaymentView", "RideHistoryView",
-                    "ProfileView", "SettingsView", "RatingView"
-                ],
-                "viewmodels": [
-                    "MapViewModel", "RideViewModel", "DriverViewModel",
-                    "LocationViewModel", "PaymentViewModel"
-                ],
-                "services": [
-                    "LocationService", "RideService", "DriverService",
-                    "PaymentService", "AuthService", "NavigationService"
-                ],
-                "features": [
-                    "real-time location tracking", "driver matching", "fare calculation",
-                    "route optimization", "payment processing", "ratings and reviews"
-                ]
-            },
-            "food_delivery": {
-                "models": [
-                    "Restaurant", "MenuItem", "Order", "Cart", "User",
-                    "Address", "Payment", "Review", "Category"
-                ],
-                "views": [
-                    "ContentView", "RestaurantListView", "RestaurantDetailView",
-                    "MenuView", "CartView", "CheckoutView", "OrderTrackingView",
-                    "AccountView", "AddressView", "PaymentView", "SearchView"
-                ],
-                "viewmodels": [
-                    "RestaurantViewModel", "CartViewModel", "OrderViewModel",
-                    "UserViewModel", "SearchViewModel"
-                ],
-                "services": [
-                    "RestaurantService", "OrderService", "AuthService",
-                    "PaymentService", "LocationService", "NetworkService"
-                ],
-                "features": [
-                    "search and filtering", "cart management", "order tracking",
-                    "user authentication", "payment processing", "location services"
-                ]
-            },
-            "social_media": {
-                "models": [
-                    "User", "Post", "Comment", "Like", "Follow",
-                    "Message", "Story", "Notification"
-                ],
-                "views": [
-                    "ContentView", "FeedView", "ProfileView", "PostDetailView",
-                    "CreatePostView", "MessagesView", "DiscoverView",
-                    "NotificationsView", "SettingsView"
-                ],
-                "viewmodels": [
-                    "FeedViewModel", "ProfileViewModel", "PostViewModel",
-                    "MessagingViewModel", "NotificationViewModel"
-                ],
-                "services": [
-                    "AuthService", "PostService", "UserService",
-                    "MessagingService", "NotificationService", "MediaService"
-                ],
-                "features": [
-                    "real-time feed", "user interactions", "messaging",
-                    "media upload", "notifications", "user discovery"
-                ]
-            },
-            "ecommerce": {
-                "models": [
-                    "Product", "Category", "Cart", "Order", "User",
-                    "Review", "Wishlist", "Payment", "Address"
-                ],
-                "views": [
-                    "ContentView", "ProductListView", "ProductDetailView",
-                    "CartView", "CheckoutView", "OrderHistoryView",
-                    "ProfileView", "WishlistView", "SearchView", "CategoryView"
-                ],
-                "viewmodels": [
-                    "ProductViewModel", "CartViewModel", "OrderViewModel",
-                    "UserViewModel", "SearchViewModel"
-                ],
-                "services": [
-                    "ProductService", "CartService", "OrderService",
-                    "AuthService", "PaymentService", "SearchService"
-                ],
-                "features": [
-                    "product catalog", "shopping cart", "secure checkout",
-                    "order management", "user accounts", "search and filters"
-                ]
-            }
-        }
-    
     def analyze_complexity(self, description: str) -> str:
-        """Determine app complexity level"""
+        """Analyze app complexity from description"""
         description_lower = description.lower()
         
-        # Check for high complexity indicators
-        for indicator in self.complexity_indicators["high"]:
-            if indicator in description_lower:
-                return "high"
-        
-        # Check for medium complexity
-        for indicator in self.complexity_indicators["medium"]:
-            if indicator in description_lower:
-                return "medium"
-        
-        return "low"
-    
-    def identify_app_type(self, description: str) -> str:
-        """Identify the specific type of complex app"""
-        description_lower = description.lower()
-        
-        # Ride sharing app patterns (check before food delivery since "uber" might match both)
-        if any(word in description_lower for word in ["ride", "taxi", "driver", "uber", "lyft", "cab"]) and \
-           not any(word in description_lower for word in ["food", "delivery", "restaurant"]):
-            return "ride_sharing"
-        
-        # Food delivery app patterns
-        if any(word in description_lower for word in ["food", "delivery", "restaurant", "doordash", "uber eats"]):
-            return "food_delivery"
-        
-        # Social media patterns
-        if any(word in description_lower for word in ["social", "instagram", "facebook", "twitter", "post", "follow"]):
-            return "social_media"
-        
-        # E-commerce patterns (including Amazon)
-        if any(word in description_lower for word in ["shop", "ecommerce", "product", "buy", "sell", "marketplace", "amazon", "store"]):
-            return "ecommerce"
-        
-        return "general"
-    
-    def create_architecture_plan(self, description: str, app_name: str) -> Dict:
-        """Create a detailed architecture plan for the app"""
-        complexity = self.analyze_complexity(description)
-        app_type = self.identify_app_type(description)
-        
-        plan = {
-            "app_name": app_name,
-            "complexity": complexity,
-            "app_type": app_type,
-            "file_structure": self._generate_file_structure(app_type, complexity),
-            "technical_requirements": self._get_technical_requirements(app_type, complexity),
-            "implementation_notes": self._get_implementation_notes(app_type)
-        }
-        
-        return plan
-    
-    def _generate_file_structure(self, app_type: str, complexity: str) -> Dict:
-        """Generate the complete file structure for the app"""
-        if complexity == "low":
-            return {
-                "Sources/App.swift": "Main app entry point",
-                "Sources/ContentView.swift": "Main view"
-            }
-        
-        # Get requirements for this app type
-        requirements = self.app_requirements.get(app_type, self._get_default_requirements())
-        
-        file_structure = {
-            "Sources/App.swift": "Main app entry point with proper initialization"
-        }
-        
-        # Add models
-        for model in requirements.get("models", []):
-            file_structure[f"Sources/Models/{model}.swift"] = f"{model} data model with Codable and Identifiable"
-        
-        # Add views
-        for view in requirements.get("views", []):
-            file_structure[f"Sources/Views/{view}.swift"] = f"{view} SwiftUI implementation"
-        
-        # Add view models
-        for vm in requirements.get("viewmodels", []):
-            file_structure[f"Sources/ViewModels/{vm}.swift"] = f"{vm} with ObservableObject"
-        
-        # Add services
-        for service in requirements.get("services", []):
-            file_structure[f"Sources/Services/{service}.swift"] = f"{service} implementation"
-        
-        # Add common utilities
-        file_structure["Sources/Utils/Extensions.swift"] = "Common extensions"
-        file_structure["Sources/Utils/Constants.swift"] = "App constants and configuration"
-        
-        return file_structure
-    
-    def _get_technical_requirements(self, app_type: str, complexity: str) -> List[str]:
-        """Get technical requirements for the app"""
-        base_requirements = [
-            "iOS 16.0+ target",
-            "SwiftUI framework",
-            "MVVM architecture",
-            "Async/await for networking",
-            "Proper error handling",
-            "Loading states"
+        # High complexity indicators
+        high_indicators = [
+            'real-time', 'location tracking', 'payment', 'multi-user',
+            'chat', 'messaging', 'delivery tracking', 'driver', 'restaurant',
+            'marketplace', 'social network', 'live', 'streaming'
         ]
         
-        if complexity == "high":
-            base_requirements.extend([
-                "Dependency injection",
-                "Protocol-oriented design",
-                "Comprehensive error recovery",
-                "Offline support consideration",
-                "Performance optimization",
-                "Memory management"
-            ])
+        # Medium complexity indicators
+        medium_indicators = [
+            'login', 'authentication', 'profile', 'api', 'database',
+            'search', 'filter', 'notifications', 'settings'
+        ]
         
-        # Add app-specific requirements
-        if app_type == "ride_sharing":
-            base_requirements.extend([
-                "MapKit integration for real-time tracking",
-                "Core Location for GPS",
-                "WebSocket for live updates",
-                "Background location updates",
-                "Push notifications for ride status"
-            ])
-        elif app_type == "food_delivery":
-            base_requirements.extend([
-                "Location services integration",
-                "Real-time order tracking",
-                "Cart persistence",
-                "Search and filtering"
-            ])
-        elif app_type == "social_media":
-            base_requirements.extend([
-                "Real-time updates",
-                "Media handling",
-                "Infinite scrolling",
-                "Push notifications setup"
-            ])
+        high_count = sum(1 for indicator in high_indicators if indicator in description_lower)
+        medium_count = sum(1 for indicator in medium_indicators if indicator in description_lower)
         
-        return base_requirements
-    
-    def _get_implementation_notes(self, app_type: str) -> str:
-        """Get implementation notes for the app type"""
-        notes = {
-            "ride_sharing": """
-Key Implementation Details:
-1. MapView must show real-time location of user and nearby drivers
-2. Implement driver matching based on proximity and availability
-3. Use Core Location for continuous location updates
-4. Calculate fare based on distance and time
-5. Show route preview before ride confirmation
-6. Real-time tracking during active ride
-7. Payment integration with multiple options
-8. Driver and rider rating system after ride completion
-9. Trip history with receipts
-10. Handle background location updates properly
-""",
-            "food_delivery": """
-Key Implementation Details:
-1. Restaurant model must include menu items as a relationship
-2. Cart should persist using @AppStorage
-3. Use TabView for main navigation (Browse, Search, Cart, Account)
-4. Implement proper navigation from list -> detail -> cart flow
-5. Mock data should include at least 10 restaurants with varied cuisines
-6. Each restaurant needs 5-10 menu items with prices
-7. Cart must update in real-time across all views
-8. Include search by restaurant name and cuisine type
-9. Add loading and empty states for all list views
-""",
-            "social_media": """
-Key Implementation Details:
-1. Use ScrollView with LazyVStack for feed performance
-2. Implement pull-to-refresh for feed updates
-3. Like/comment counts should update immediately
-4. Profile view should show user's posts
-5. Include image placeholders for all media
-6. Mock data should include varied post types
-7. Implement proper navigation stack
-8. Add loading states for all async operations
-""",
-            "ecommerce": """
-Key Implementation Details:
-1. Product grid layout with 2 columns
-2. Cart badge on tab bar showing item count
-3. Wishlist functionality with heart icons
-4. Search with real-time filtering
-5. Category-based navigation
-6. Product details with image carousel placeholder
-7. Reviews section with ratings
-8. Proper checkout flow with steps
-"""
-        }
-        
-        return notes.get(app_type, "Follow standard SwiftUI best practices")
-    
-    def _get_default_requirements(self) -> Dict:
-        """Get default requirements for general complex apps"""
-        return {
-            "models": ["Item", "User", "Settings"],
-            "views": ["ContentView", "ListView", "DetailView", "SettingsView"],
-            "viewmodels": ["MainViewModel", "SettingsViewModel"],
-            "services": ["DataService", "NetworkService"],
-            "features": ["basic CRUD", "settings", "data persistence"]
-        }
-    
-    def create_enhanced_prompt(self, description: str, app_name: str) -> str:
-        """Create an enhanced prompt with architectural guidance"""
-        plan = self.create_architecture_plan(description, app_name)
-        
-        # For complex apps, we need a more concise prompt to avoid token limits
-        # Focus on the most critical files first
-        
-        if plan["complexity"] == "high":
-            # Create a focused prompt for essential files only
-            prompt = f"""Create a {plan['app_type'].replace('_', ' ')} iOS app called "{app_name}".
-
-DESCRIPTION: {description}
-
-Create these ESSENTIAL files for a working MVP:
-
-CORE FILES (MUST CREATE ALL):
-1. Sources/App.swift - Main app with TabView navigation
-2. Sources/Models/Restaurant.swift - Include name, cuisine, rating, image, menuItems array
-3. Sources/Models/MenuItem.swift - Include name, description, price, category
-4. Sources/Models/Cart.swift - Singleton with @Published items, addItem, removeItem, total
-5. Sources/Views/ContentView.swift - TabView with 4 tabs
-6. Sources/Views/RestaurantListView.swift - List of restaurants with search
-7. Sources/Views/RestaurantDetailView.swift - Show restaurant info and menu
-8. Sources/Views/CartView.swift - Show cart items with checkout button
-9. Sources/ViewModels/RestaurantViewModel.swift - ObservableObject with restaurants array
-10. Sources/ViewModels/CartViewModel.swift - ObservableObject managing cart state
-
-REQUIREMENTS:
-- iOS 16.0+ SwiftUI
-- Use @StateObject/@ObservedObject properly
-- Include mock data (10+ restaurants)
-- Cart persists with @AppStorage
-- All navigation must work
-- MVVM architecture
-
-Each file must be complete and functional. Start with App.swift."""
+        if high_count >= 3:
+            return "high"
+        elif high_count >= 1 or medium_count >= 3:
+            return "medium"
         else:
-            # Use the original detailed prompt for simpler apps
-            file_list = "\n".join([f"- {path}" for path in list(plan["file_structure"].keys())[:20]])
-            prompt = f"""Create a {plan['app_type'].replace('_', ' ')} iOS app called "{app_name}".
-
-{description}
-
-Required files:
-{file_list}
-
-Requirements:
-- iOS 16.0+ SwiftUI
-- Complete implementation
-- All files must compile"""
+            return "low"
+            
+    def identify_app_type(self, description: str) -> str:
+        """Identify the type of app from description"""
+        app_type = self.templates.detect_app_type(description)
+        if app_type:
+            return app_type.value
+        return "general"
         
-        return prompt
+    def create_enhanced_prompt(self, description: str, app_name: str) -> str:
+        """Create an enhanced prompt for complex app generation"""
+        
+        # Detect app type
+        app_type = self.templates.detect_app_type(description)
+        if not app_type:
+            return description  # Fallback to original description
+            
+        # Get template data
+        template = self.templates.templates.get(app_type)
+        if not template:
+            return description
+            
+        # Sanitize the description
+        sanitized_desc = self.templates.sanitize_app_request(description)
+        
+        # Build enhanced prompt
+        enhanced_prompt = f"""
+Create a comprehensive {template['description']} iOS app named {app_name}.
+
+IMPORTANT LEGAL REQUIREMENTS:
+- Use ONLY generic branding and naming
+- Do NOT use any copyrighted terms or trademarks
+- Create original UI designs and color schemes
+- Implement common features found in {app_type.value} apps
+
+APP ARCHITECTURE:
+- Pattern: MVVM + Clean Architecture
+- Navigation: Coordinator pattern with role-based flows
+- State Management: @StateObject, @EnvironmentObject, and Combine
+- Dependency Injection: DIContainer pattern
+- Error Handling: Comprehensive error handling with user feedback
+
+USER ROLES:
+"""
+        
+        # Add user roles
+        for role in template['roles']:
+            role_name = role.value.capitalize()
+            enhanced_prompt += f"\n{role_name}:\n"
+            if role in template['core_screens']:
+                screens = template['core_screens'][role]
+                enhanced_prompt += f"- Screens: {', '.join(screens[:5])}\n"
+                
+        enhanced_prompt += f"""
+CORE FEATURES:
+"""
+        # Add features
+        for feature in template['features'][:7]:  # Limit to 7 features
+            enhanced_prompt += f"- {feature}\n"
+            
+        enhanced_prompt += f"""
+DATA MODELS:
+- {', '.join(template['models'][:8])}
+
+TECHNICAL REQUIREMENTS:
+1. Use SwiftUI with iOS 16.0 minimum deployment
+2. Implement proper loading states and error handling
+3. Use async/await for all asynchronous operations
+4. Add @MainActor to all ViewModels
+5. Create mock services for demonstration
+6. Use SF Symbols for icons
+7. Implement proper data validation
+
+STRUCTURE:
+Create a complete app with:
+1. App.swift with role-based navigation
+2. Models for all entities
+3. ViewModels with business logic
+4. Views for each screen
+5. Mock services for data
+6. Proper error handling
+7. Loading and empty states
+
+The app should be fully functional with mock data and demonstrate all core features.
+"""
+        
+        return enhanced_prompt
+        
+    def generate_app_structure(self, app_type: AppType) -> Dict[str, Any]:
+        """Generate the file structure for a complex app"""
+        
+        template = self.templates.templates.get(app_type)
+        if not template:
+            return {}
+            
+        structure = {
+            "app_name": template['name'],
+            "folders": {
+                "App": ["App.swift", "AppCoordinator.swift", "DIContainer.swift"],
+                "Domain": {
+                    "Models": [f"{model}.swift" for model in template['models'][:5]],
+                    "UseCases": ["LoginUseCase.swift", "FetchDataUseCase.swift"],
+                    "Repositories": ["UserRepository.swift", "DataRepository.swift"]
+                },
+                "Data": {
+                    "Network": ["NetworkService.swift", "Endpoint.swift", "NetworkError.swift"],
+                    "Persistence": ["CoreDataManager.swift", "UserDefaultsService.swift"],
+                    "Repositories": ["UserRepositoryImpl.swift", "DataRepositoryImpl.swift"]
+                },
+                "Presentation": {
+                    "ViewModels": [],
+                    "Views": {
+                        "Common": ["LoadingView.swift", "ErrorView.swift", "EmptyStateView.swift"],
+                        "Authentication": ["LoginView.swift", "SignUpView.swift"],
+                    },
+                    "Components": ["CustomButton.swift", "CustomTextField.swift"]
+                },
+                "Services": ["LocationService.swift", "NotificationService.swift"],
+                "Mock": ["MockNetworkService.swift", "MockData.swift"]
+            }
+        }
+        
+        # Add role-specific views
+        for role in template['roles']:
+            if role in template['core_screens']:
+                role_folder = f"{role.value.capitalize()}Views"
+                structure["folders"]["Presentation"]["Views"][role_folder] = [
+                    f"{screen}.swift" for screen in template['core_screens'][role][:5]
+                ]
+                
+        return structure
+        
+    def create_architecture_files(self, app_type: AppType) -> List[Dict[str, str]]:
+        """Create the core architecture files for the app"""
+        files = []
+        
+        # Get templates
+        architecture_template = self.templates.get_architecture_template(app_type)
+        navigation_template = self.templates.get_navigation_coordinator(app_type)
+        di_template = self.templates.get_dependency_injection_container()
+        mock_template = self.templates.get_mock_services(app_type)
+        
+        # Create core files
+        files.extend([
+            {
+                "path": "Sources/App/AppCoordinator.swift",
+                "content": navigation_template
+            },
+            {
+                "path": "Sources/App/DIContainer.swift", 
+                "content": di_template
+            },
+            {
+                "path": "Sources/Services/MockNetworkService.swift",
+                "content": mock_template
+            }
+        ])
+        
+        return files
+        
+    def validate_complex_app_generation(self, generated_code: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Validate that generated code meets complex app requirements"""
+        issues = []
+        
+        # Check for required files
+        files = generated_code.get('files', [])
+        file_paths = [f['path'] for f in files]
+        
+        # Required patterns
+        required_patterns = [
+            'Coordinator',  # Navigation coordinator
+            'ViewModel',    # ViewModels
+            'Repository',   # Repository pattern
+            'UseCase',      # Use cases
+            'Service',      # Services
+            'Mock'          # Mock data
+        ]
+        
+        for pattern in required_patterns:
+            if not any(pattern in path for path in file_paths):
+                issues.append(f"Missing {pattern} implementation")
+                
+        # Check for role-based navigation
+        app_content = next((f['content'] for f in files if 'App.swift' in f['path']), '')
+        if 'navigationDestination' not in app_content:
+            issues.append("Missing role-based navigation implementation")
+            
+        # Check for proper architecture
+        has_clean_arch = any('Domain' in path or 'Data' in path or 'Presentation' in path 
+                           for path in file_paths)
+        if not has_clean_arch:
+            issues.append("Missing Clean Architecture layer separation")
+            
+        return len(issues) == 0, issues

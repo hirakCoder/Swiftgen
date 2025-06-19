@@ -468,10 +468,19 @@ class ComprehensiveCodeValidator:
         """Fix MainActor issues"""
         # Fix ViewModels that need @MainActor
         if 'ViewModel' in issue.message and '@MainActor' in issue.message:
-            # Find ViewModel classes without @MainActor
-            pattern = r'(class\s+\w+ViewModel\s*:\s*ObservableObject)'
-            replacement = r'@MainActor\n\1'
-            content = re.sub(pattern, replacement, content)
+            # First check if @MainActor already exists to avoid duplicates
+            if '@MainActor' not in content:
+                # Find ViewModel classes without @MainActor
+                pattern = r'(class\s+\w+ViewModel\s*:\s*ObservableObject)'
+                replacement = r'@MainActor\n\1'
+                content = re.sub(pattern, replacement, content)
+        
+        # Fix duplicate @MainActor attributes
+        if 'multiple global actor attributes' in issue.message:
+            # Remove duplicate @MainActor
+            content = re.sub(r'(@MainActor\s*\n\s*)+@MainActor', '@MainActor', content)
+            # Also handle inline duplicates
+            content = re.sub(r'@MainActor\s+@MainActor', '@MainActor', content)
         
         # Fix Task blocks using DispatchQueue.main
         if 'Task' in issue.message and 'DispatchQueue.main' in issue.message:

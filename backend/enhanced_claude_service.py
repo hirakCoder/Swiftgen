@@ -72,7 +72,7 @@ class EnhancedClaudeService:
                 name="xAI Grok",
                 provider="xai",
                 api_key_env="XAI_API_KEY",
-                model_id="grok-beta",
+                model_id="grok-beta",  # Correct model name confirmed by xAI docs
                 max_tokens=4096
             )
         ]
@@ -109,12 +109,16 @@ class EnhancedClaudeService:
                 self._clients["anthropic"] = anthropic.Anthropic(api_key=self.api_keys["anthropic"])
                 return True
             elif provider == "openai" and provider not in self._clients:
-                openai.api_key = self.api_keys["openai"]
-                self._clients["openai"] = openai
+                from openai import OpenAI
+                self._clients["openai"] = OpenAI(api_key=self.api_keys["openai"])
                 return True
             elif provider == "xai" and provider not in self._clients:
-                # xAI client initialization would go here
-                self._clients["xai"] = None  # Placeholder
+                # xAI uses OpenAI-compatible API
+                from openai import OpenAI
+                self._clients["xai"] = OpenAI(
+                    api_key=self.api_keys.get("xai", ""),
+                    base_url="https://api.x.ai/v1"
+                )
                 return True
             return provider in self._clients
         except Exception as e:
@@ -342,19 +346,44 @@ Return a JSON response with this EXACT structure:
         return response.choices[0].message.content
 
     async def _generate_xai(self, system_prompt: str, user_prompt: str) -> str:
-        """Generate text using xAI"""
-        # Since xAI is not implemented, fall back to Claude
-        logger.warning("xAI not implemented, falling back to Claude")
-        
-        # Use Claude as fallback
-        if "anthropic" in self.models:
-            self.current_model = self.models["anthropic"]
-            return await self._generate_claude(system_prompt, user_prompt)
-        elif "openai" in self.models:
-            self.current_model = self.models["openai"]
-            return await self._generate_openai(system_prompt, user_prompt)
-        else:
-            raise NotImplementedError("No fallback LLM available")
+        """Generate text using xAI Grok"""
+        try:
+            # xAI API is compatible with OpenAI format
+            # Use OpenAI SDK with xAI endpoint
+            from openai import OpenAI
+            
+            # Initialize xAI client with custom base URL
+            xai_client = OpenAI(
+                api_key=self.api_keys.get("xai", ""),
+                base_url="https://api.x.ai/v1"
+            )
+            
+            # Create chat completion using Grok
+            response = xai_client.chat.completions.create(
+                model=self.current_model.model_id,  # grok-beta
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=self.current_model.max_tokens,
+                temperature=self.current_model.temperature
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"xAI generation failed: {str(e)}")
+            
+            # Fallback to Claude only if xAI actually fails
+            logger.warning("xAI request failed, falling back to Claude")
+            if "anthropic" in self.models:
+                self.current_model = self.models["anthropic"]
+                return await self._generate_claude(system_prompt, user_prompt)
+            elif "openai" in self.models:
+                self.current_model = self.models["openai"]
+                return await self._generate_openai(system_prompt, user_prompt)
+            else:
+                raise Exception(f"xAI generation failed and no fallback available: {str(e)}")
 
     def generate_text(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Synchronous wrapper for compatibility"""

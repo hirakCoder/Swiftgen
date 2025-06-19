@@ -1268,6 +1268,12 @@ Return a JSON response with the modified files and changes made."""
                 modified_code = healed
                 validation_result = await qa_pipeline.validate(modified_code)
 
+        # Apply final syntax fixes before saving
+        if modification_handler and hasattr(modification_handler, 'validate_and_fix_swift_syntax'):
+            print("[MAIN] Applying final SwiftUI syntax validation...")
+            fixed_files = modification_handler.validate_and_fix_swift_syntax(modified_code.get("files", []))
+            modified_code["files"] = fixed_files
+        
         # Update project state
         project_state[project_id]["current_files"] = modified_code.get("files", []).copy()
         project_state[project_id]["version"] += 1
