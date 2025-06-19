@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: Sources/ViewModels/TodoViewModel.swift:7:7: error:...",
+  "content": "Error: Sources/ViewModels/TodoViewModel.swift:7:7: error: declaration can not have multiple global actor attributes ('MainActor' and 'MainActor'); The following build commands failed:\n\nSolution: Fixed 2 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 2 errors using RAG patterns"
+  ]
+}

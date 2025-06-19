@@ -1,0 +1,16 @@
+{
+  "title": "Swift Patterns from apple/swift-async-algorithms",
+  "content": "Defines struct Availability",
+  "tags": [
+    "github",
+    "patterns",
+    "swift",
+    "swift-async-algorithms"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Patterns learned from apple/swift-async-algorithms"
+  ],
+  "source": "github",
+  "repo": "apple/swift-async-algorithms"
+}

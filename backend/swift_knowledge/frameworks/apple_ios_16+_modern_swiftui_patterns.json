@@ -1,0 +1,17 @@
+{
+  "title": "iOS 16+ Modern SwiftUI Patterns",
+  "content": "\n                Essential iOS 16+ patterns for SwiftUI:\n                \n                1. Navigation:\n                NavigationStack {\n                    // Content\n                }\n                .navigationDestination(for: ItemType.self) { item in\n                    DetailView(item: item)\n                }\n                \n                2. Dismissal:\n                @Environment(\\.dismiss) private var dismiss\n                Button(\"Close\") { dismiss() }\n                \n                3. Sheets and Presentations:\n                .sheet(isPresented: $showSheet) {\n                    SheetView()\n                        .presentationDetents([.medium, .large])\n                }\n                \n                4. Async Operations:\n                .task {\n                    await loadData()\n                }\n                \n                5. Modern Form Patterns:\n                Form {\n                    Section(\"User Info\") {\n                        TextField(\"Name\", text: $name)\n                    }\n                }\n                .formStyle(.grouped)\n                \n                6. Search:\n                .searchable(text: $searchText)\n                \n                7. Pull to Refresh:\n                .refreshable {\n                    await refreshData()\n                }\n            ",
+  "tags": [
+    "ios16",
+    "swiftui",
+    "modern",
+    "patterns"
+  ],
+  "severity": "important",
+  "solutions": [
+    "Always target iOS 16+ for new apps",
+    "Use modern SwiftUI APIs",
+    "Prefer new navigation patterns",
+    "Implement proper async handling"
+  ]
+}

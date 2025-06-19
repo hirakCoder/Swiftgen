@@ -72,7 +72,7 @@ class EnhancedClaudeService:
                 name="xAI Grok",
                 provider="xai",
                 api_key_env="XAI_API_KEY",
-                model_id="grok-beta",  # Correct model name confirmed by xAI docs
+                model_id="grok-3-latest",  # Correct model name confirmed by xAI docs
                 max_tokens=4096
             )
         ]
@@ -360,7 +360,7 @@ Return a JSON response with this EXACT structure:
             
             # Create chat completion using Grok
             response = xai_client.chat.completions.create(
-                model=self.current_model.model_id,  # grok-beta
+                model=self.current_model.model_id,  # grok-3-latest
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}

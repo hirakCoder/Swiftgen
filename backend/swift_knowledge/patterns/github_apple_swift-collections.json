@@ -1,0 +1,16 @@
+{
+  "title": "Swift Patterns from apple/swift-collections",
+  "content": "Defines struct CustomTarget",
+  "tags": [
+    "github",
+    "patterns",
+    "swift",
+    "swift-collections"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Patterns learned from apple/swift-collections"
+  ],
+  "source": "github",
+  "repo": "apple/swift-collections"
+}

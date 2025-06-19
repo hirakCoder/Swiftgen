@@ -1,0 +1,17 @@
+{
+  "title": "App Store Review Guidelines Compliance",
+  "content": "\n                Critical App Store compliance requirements:\n                \n                1. Content Policy:\n                - No inappropriate content\n                - Accurate app description\n                - Proper content ratings\n                \n                2. Technical Requirements:\n                - No crashes or bugs\n                - Complete app functionality\n                - Proper error handling\n                - iOS version compatibility\n                \n                3. Privacy:\n                - Privacy policy if collecting data\n                - Proper permission requests\n                - Data handling transparency\n                \n                4. Performance:\n                - Fast launch times\n                - Responsive UI\n                - Efficient resource usage\n                \n                5. Design:\n                - Native iOS look and feel\n                - Proper navigation patterns\n                - Apple HIG compliance\n            ",
+  "tags": [
+    "app-store",
+    "compliance",
+    "review",
+    "guidelines"
+  ],
+  "severity": "critical",
+  "solutions": [
+    "Test thoroughly before submission",
+    "Follow all technical guidelines",
+    "Include proper privacy information",
+    "Use native iOS patterns only"
+  ]
+}

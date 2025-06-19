@@ -1,0 +1,18 @@
+{
+  "title": "Apple Human Interface Guidelines for iOS",
+  "content": "\n                Essential Apple HIG compliance patterns:\n                \n                1. Accessibility:\n                - Minimum touch target: 44x44 points\n                - Support VoiceOver with proper labels\n                - Dynamic Type support for text scaling\n                - High contrast color support\n                \n                2. Navigation:\n                - Use NavigationStack for iOS 16+\n                - Clear navigation hierarchy\n                - Consistent back button behavior\n                \n                3. Layout:\n                - Safe area respect\n                - Adaptive layouts for all screen sizes\n                - Proper spacing and margins\n                \n                4. Performance:\n                - Lazy loading for large data sets\n                - Efficient list rendering\n                - Proper memory management\n                \n                5. App Store Requirements:\n                - Privacy manifest if needed\n                - Proper app metadata\n                - Screenshot requirements\n                - Age-appropriate content ratings\n            ",
+  "tags": [
+    "apple",
+    "hig",
+    "guidelines",
+    "app-store",
+    "accessibility"
+  ],
+  "severity": "important",
+  "solutions": [
+    "Follow Apple HIG for all UI decisions",
+    "Test with VoiceOver enabled",
+    "Support Dynamic Type",
+    "Use system colors and fonts"
+  ]
+}
