@@ -34,9 +34,16 @@ Before diving into any problem, check if it's already documented:
 When starting work on SwiftGen:
 1. [ ] Read this CLAUDE.md file
 2. [ ] Review MASTER_ISSUES_AND_FIXES.md
-3. [ ] Check recent session summaries
-4. [ ] Verify what's actually working vs claimed to work
-5. [ ] Test basic functionality before adding features
+3. [ ] **NEW**: Check TOMORROW_ACTION_PLAN.md if it exists
+4. [ ] Check recent session summaries
+5. [ ] Verify what's actually working vs claimed to work
+6. [ ] Test basic functionality before adding features
+
+## 🔴 CRITICAL ACTIVE ISSUE (Dec 19, 2024)
+**Modifications work initially then fail after a few attempts**
+- Some mods work, then "No modifications processed due to error in chat reply"
+- App rebuilds WITHOUT changes
+- See TOMORROW_ACTION_PLAN.md for debug strategy
 
 ## 🔄 Recurring Issues Reference
 
