@@ -1,0 +1,14 @@
+{
+  "title": "Validation Failure: 2025-06-23 17:23",
+  "content": "Validation failed with 2 errors:\n[DependencyValidator] Sources/Services/QuoteService.swift: Found phantom dependency: .shared.\n[DependencyValidator] Sources/Views/Components/ActionButtonsView.swift: Found phantom dependency: .shared.",
+  "tags": [
+    "validation",
+    "failure",
+    "DependencyValidator",
+    "DependencyValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

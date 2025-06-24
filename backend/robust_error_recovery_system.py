@@ -110,13 +110,22 @@ class RobustErrorRecoverySystem:
             "string_literal": {
                 "patterns": [
                     "unterminated string literal",
-                    "cannot find '\"' in scope",
-                    "consecutive statements on a line must be separated"
+                    "cannot find '\"' in scope"
                 ],
                 "fixes": [
                     "Use double quotes \" for strings, not single quotes '",
                     "Ensure all string literals are properly terminated",
                     "Check for unescaped quotes within strings"
+                ]
+            },
+            "semicolon_error": {
+                "patterns": [
+                    "consecutive statements on a line must be separated"
+                ],
+                "fixes": [
+                    "Add semicolons between statements on the same line",
+                    "Move each statement to its own line (preferred)",
+                    "Check for missing newlines in generated code"
                 ]
             },
             "persistence_controller": {
@@ -251,7 +260,7 @@ class RobustErrorRecoverySystem:
         return strategies
 
     async def recover_from_errors(self, errors: List[str], swift_files: List[Dict],
-                                  bundle_id: str = None) -> Tuple[bool, List[Dict], List[str]]:
+                                  bundle_id: str = None, is_modification: bool = False) -> Tuple[bool, List[Dict], List[str]]:
         """Main recovery method that tries multiple strategies"""
 
         self.logger.info(f"Starting error recovery with {len(errors)} errors")
@@ -283,7 +292,7 @@ class RobustErrorRecoverySystem:
         for strategy in self.recovery_strategies:
             try:
                 self.logger.info(f"Attempting recovery strategy: {strategy.__name__}")
-                success, modified_files = await strategy(errors, modified_files, error_analysis)
+                success, modified_files = await strategy(errors, modified_files, error_analysis, is_modification)
 
                 if success:
                     self.logger.info(f"Recovery strategy {strategy.__name__} made changes")
@@ -400,7 +409,7 @@ class RobustErrorRecoverySystem:
         return analysis
 
     async def _pattern_based_recovery(self, errors: List[str], swift_files: List[Dict],
-                                      error_analysis: Dict) -> Tuple[bool, List[Dict]]:
+                                      error_analysis: Dict, is_modification: bool = False) -> Tuple[bool, List[Dict]]:
         """Pattern-based recovery for common errors"""
         self.logger.info(f"Pattern-based recovery processing {len(errors)} errors: {[e[:80] for e in errors[:3]]}")
 
@@ -906,7 +915,7 @@ class RobustErrorRecoverySystem:
         return changes_made, modified_files
 
     async def _swift_syntax_recovery(self, errors: List[str], swift_files: List[Dict],
-                                     error_analysis: Dict) -> Tuple[bool, List[Dict]]:
+                                     error_analysis: Dict, is_modification: bool = False) -> Tuple[bool, List[Dict]]:
         """Swift-specific syntax recovery"""
 
         modified_files = []
@@ -924,6 +933,28 @@ class RobustErrorRecoverySystem:
             if "Date()" in content and "import Foundation" not in content:
                 content = "import Foundation\n" + content
                 changes_made = True
+            
+            # Fix semicolon errors - but carefully!
+            for error in errors:
+                if "consecutive statements on a line must be separated" in error:
+                    # Extract line number from error
+                    line_match = re.search(r':(\d+):\d+:', error)
+                    if line_match:
+                        line_num = int(line_match.group(1)) - 1
+                        lines = content.split('\n')
+                        if 0 <= line_num < len(lines):
+                            line = lines[line_num]
+                            # Only add semicolons in very specific cases
+                            # Case 1: let/var followed by let/var
+                            fixed_line = re.sub(r'(let\s+\w+\s*=\s*[^;]+)(\s+)(let\s+)', r'\1;\2\3', line)
+                            fixed_line = re.sub(r'(var\s+\w+\s*=\s*[^;]+)(\s+)(var\s+)', r'\1;\2\3', fixed_line)
+                            # Case 2: Function call followed by statement
+                            fixed_line = re.sub(r'(\w+\(\))(\s+)(let\s+|var\s+|if\s+|for\s+)', r'\1;\2\3', fixed_line)
+                            
+                            if fixed_line != line:
+                                lines[line_num] = fixed_line
+                                content = '\n'.join(lines)
+                                changes_made = True
 
             modified_files.append({
                 "path": file["path"],
@@ -933,7 +964,7 @@ class RobustErrorRecoverySystem:
         return changes_made, modified_files
 
     async def _dependency_recovery(self, errors: List[str], swift_files: List[Dict],
-                                   error_analysis: Dict) -> Tuple[bool, List[Dict]]:
+                                   error_analysis: Dict, is_modification: bool = False) -> Tuple[bool, List[Dict]]:
         """Fix missing dependencies"""
 
         if not error_analysis["missing_imports"]:
@@ -991,7 +1022,7 @@ class RobustErrorRecoverySystem:
         return changes_made, modified_files
 
     async def _rag_based_recovery(self, errors: List[str], swift_files: List[Dict],
-                                  error_analysis: Dict) -> Tuple[bool, List[Dict]]:
+                                  error_analysis: Dict, is_modification: bool = False) -> Tuple[bool, List[Dict]]:
         """Use RAG knowledge base to fix errors before resorting to LLMs"""
         
         if not self.rag_kb:
@@ -1142,7 +1173,7 @@ class RobustErrorRecoverySystem:
         return content
 
     async def _llm_based_recovery(self, errors: List[str], swift_files: List[Dict],
-                                  error_analysis: Dict) -> Tuple[bool, List[Dict]]:
+                                  error_analysis: Dict, is_modification: bool = False) -> Tuple[bool, List[Dict]]:
         """Use LLMs to fix errors"""
 
         # Try Claude first if available - FIXED METHOD CALL
@@ -1155,14 +1186,16 @@ class RobustErrorRecoverySystem:
 
                     # Create a modification request that fixes the errors
                     # Check if we need to create missing files
+                    # BUT: Don't create new files during modifications - only fix existing ones
                     missing_views = []
-                    for error in errors:
-                        if "cannot find" in error and "View" in error and "in scope" in error:
-                            # Extract the missing view name
-                            import re
-                            match = re.search(r"cannot find '(\w+View)' in scope", error)
-                            if match:
-                                missing_views.append(match.group(1))
+                    if not is_modification:  # Only generate files during initial app creation
+                        for error in errors:
+                            if "cannot find" in error and "View" in error and "in scope" in error:
+                                # Extract the missing view name
+                                import re
+                                match = re.search(r"cannot find '(\w+View)' in scope", error)
+                                if match:
+                                    missing_views.append(match.group(1))
                     
                     if missing_views:
                         modification_request = f"Fix these build errors by creating the missing SwiftUI views:\n"
@@ -1317,8 +1350,60 @@ Return a JSON object with this structure:
 
     async def _xai_recovery(self, errors: List[str], swift_files: List[Dict],
                             error_analysis: Dict) -> Tuple[bool, List[Dict]]:
-        """Use xAI (Grok) for recovery - placeholder for now"""
-        # xAI implementation would go here when API is available
+        """Use xAI (Grok) for recovery with strict iOS 16 constraints"""
+        
+        if not self.xai_key:
+            self.logger.warning("xAI API key not available")
+            return False, swift_files
+        
+        try:
+            # Import OpenAI client for xAI (compatible API)
+            from openai import AsyncOpenAI
+            
+            client = AsyncOpenAI(
+                api_key=self.xai_key,
+                base_url="https://api.x.ai/v1"
+            )
+            
+            # Create iOS 16-specific prompt
+            fix_prompt = self._create_ios16_strict_error_fix_prompt(errors, swift_files, error_analysis)
+            
+            response = await client.chat.completions.create(
+                model="grok-beta",
+                messages=[
+                    {"role": "system", "content": """You are an expert Swift developer fixing iOS app compilation errors.
+
+CRITICAL CONSTRAINTS:
+1. Target iOS 16.0 ONLY - NEVER use iOS 17+ features
+2. NEVER use: .symbolEffect(), .bounce, @Observable, .scrollBounceBehavior, .contentTransition, ContentUnavailableView, AnyShapeStyle
+3. Use iOS 16 alternatives:
+   - .symbolEffect() → .scaleEffect() or .opacity() animations
+   - .bounce → .animation(.spring())
+   - @Observable → ObservableObject + @Published
+   - NavigationStack → NavigationView for simple navigation
+   - AnyShapeStyle → Use concrete types like Color or LinearGradient
+4. Return complete, working Swift code that compiles on iOS 16.0"""},
+                    {"role": "user", "content": fix_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=8000
+            )
+            
+            # Parse response
+            response_text = response.choices[0].message.content
+            fixed_files = self._parse_ai_response(response_text, swift_files)
+            
+            if fixed_files:
+                # Additional iOS 17 feature check
+                for file in fixed_files:
+                    file['content'] = self._remove_ios17_features(file['content'])
+                
+                self.logger.info("xAI recovery successful with iOS 16 constraints")
+                return True, fixed_files
+        
+        except Exception as e:
+            self.logger.error(f"xAI recovery failed: {e}")
+        
         return False, swift_files
 
     def _create_error_fix_prompt(self, errors: List[str], swift_files: List[Dict],
@@ -1636,6 +1721,130 @@ struct ContentView: View {
             self.logger.info(f"Applied {fixes_made} string literal fixes to content")
         
         return '\n'.join(fixed_lines)
+    
+    def _create_ios16_strict_error_fix_prompt(self, errors: List[str], swift_files: List[Dict],
+                                               error_analysis: Dict) -> str:
+        """Create a prompt specifically for iOS 16 compatibility fixes"""
+        
+        # Get relevant files with errors
+        error_files = set()
+        for error in errors:
+            match = re.search(r'(Sources/[^:]+\.swift)', error)
+            if match:
+                error_files.add(match.group(1))
+        
+        relevant_files = [f for f in swift_files if f["path"] in error_files]
+        
+        newline = '\n'
+        errors_text = newline.join(errors[:10])
+        files_text = newline.join([f"File: {f['path']}\n```swift\n{f['content']}\n```" for f in relevant_files])
+        
+        prompt = f"""Fix these Swift compilation errors with STRICT iOS 16.0 compatibility.
+
+ERRORS:
+{errors_text}
+
+FILES WITH ERRORS:
+{files_text}
+
+CRITICAL iOS 16 REQUIREMENTS:
+1. Target iOS: 16.0 ONLY - This is non-negotiable
+2. FORBIDDEN iOS 17+ features (DO NOT USE):
+   - .symbolEffect() → Use .scaleEffect() or .opacity() with animation
+   - .bounce → Use .animation(.spring())
+   - @Observable → Use ObservableObject + @Published
+   - .scrollBounceBehavior → Remove or use ScrollView without it
+   - .contentTransition → Use regular transitions
+   - ContentUnavailableView → Create custom empty state view
+   - AnyShapeStyle → Use concrete types like Color, LinearGradient
+   - NavigationStack with complex paths → Use NavigationView
+
+3. iOS 16 replacements:
+   - For animations: .animation(.easeInOut) or .animation(.spring())
+   - For state: ObservableObject protocol with @Published properties
+   - For navigation: NavigationView with NavigationLink
+   - For shapes: Use concrete types, not AnyShapeStyle
+
+4. If you see "is only available in iOS 17", you MUST replace it with iOS 16 alternative
+
+Return JSON with ALL files (modified and unmodified):
+{{
+    "files": [
+        {{
+            "path": "Sources/FileName.swift",
+            "content": "// Complete code compatible with iOS 16.0"
+        }}
+    ],
+    "fixes_applied": ["Specific iOS 16 compatibility fixes applied"]
+}}"""
+        
+        return prompt
+    
+    def _remove_ios17_features(self, content: str) -> str:
+        """Remove or replace iOS 17+ features with iOS 16 alternatives"""
+        
+        # Replace .symbolEffect with animation alternatives
+        content = re.sub(
+            r'\.symbolEffect\([^)]*\)',
+            '.scaleEffect(1.1).animation(.easeInOut(duration: 0.3), value: true)',
+            content
+        )
+        
+        # Replace .bounce with spring animation
+        content = re.sub(
+            r'\.bounce\b',
+            '.animation(.spring())',
+            content
+        )
+        
+        # Replace @Observable with ObservableObject
+        content = re.sub(
+            r'@Observable\s+class\s+(\w+)',
+            r'class \1: ObservableObject',
+            content
+        )
+        
+        # Remove .scrollBounceBehavior
+        content = re.sub(
+            r'\.scrollBounceBehavior\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Remove .contentTransition
+        content = re.sub(
+            r'\.contentTransition\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Replace ContentUnavailableView with custom implementation
+        if 'ContentUnavailableView' in content:
+            content = re.sub(
+                r'ContentUnavailableView\([^}]+\}',
+                '''VStack(spacing: 16) {
+                    Image(systemName: "tray")
+                        .font(.system(size: 50))
+                        .foregroundColor(.gray)
+                    Text("No Content Available")
+                        .font(.headline)
+                        .foregroundColor(.gray)
+                }''',
+                content
+            )
+        
+        # Replace AnyShapeStyle with Color
+        content = re.sub(
+            r':\s*any\s+ShapeStyle|:\s*AnyShapeStyle',
+            ': Color',
+            content
+        )
+        
+        # Replace NavigationStack with NavigationView for simple cases
+        if 'NavigationStack' in content and 'path:' not in content:
+            content = content.replace('NavigationStack', 'NavigationView')
+        
+        return content
 
 
 def create_intelligent_recovery_system(claude_service=None, openai_key=None, xai_key=None):

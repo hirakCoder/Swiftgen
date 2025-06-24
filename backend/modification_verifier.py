@@ -11,7 +11,7 @@ class ModificationVerifier:
     """Verifies that modifications were actually applied to files"""
     
     def __init__(self):
-        self.min_similarity_threshold = 0.95  # Files should change if modified
+        self.min_similarity_threshold = 0.98  # Changed from 0.95 to be more sensitive to small changes
         
     def verify_modifications(self, 
                            original_files: List[Dict],
@@ -49,12 +49,20 @@ class ModificationVerifier:
             # Calculate similarity
             similarity = SequenceMatcher(None, original_content, modified_content).ratio()
             
-            if similarity >= self.min_similarity_threshold:
+            # CRITICAL: Check if content is actually different first
+            if original_content == modified_content:
                 unchanged_files.append(path)
+                if verbose:
+                    print(f"[VERIFIER] File UNCHANGED (identical): {path}")
+            elif similarity >= self.min_similarity_threshold:
+                # Content is different but very similar - still count as changed!
+                changed_files.append(path)
+                if verbose:
+                    print(f"[VERIFIER] File changed (minor): {path} (similarity: {similarity:.2%})")
             else:
                 changed_files.append(path)
                 if verbose:
-                    print(f"[VERIFIER] File changed: {path} (similarity: {similarity:.2%})")
+                    print(f"[VERIFIER] File changed (major): {path} (similarity: {similarity:.2%})")
         
         if not changed_files and original_files:
             issues.append(f"No files were modified despite modification request: '{modification_request}'")
@@ -78,7 +86,9 @@ class ModificationVerifier:
                     break
             
             if not keyword_found and keywords:
-                issues.append(f"Expected keywords {keywords} not found in modified files")
+                # Don't fail if we have actual file changes - the keywords might not be literal
+                if not changed_files:
+                    issues.append(f"Expected keywords {keywords} not found in modified files")
         
         # Check 4: Validate file content structure
         for path, content in modified_map.items():

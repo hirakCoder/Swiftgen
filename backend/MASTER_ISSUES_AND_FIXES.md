@@ -55,17 +55,246 @@
 - Created specific handlers like `_fix_count_bug()`
 - Now actually modifies files when LLM fails
 
-### 6. Modification Not Applied Despite App Launch (Active Issue: Dec 19, 2024)
-**Problem**: UI shows "No modifications were processed due to error in chat reply"
+### 6. Modification Degradation After Initial Success (FIXED: Dec 20, 2024)
+**Problem**: First 2-3 modifications work, then all subsequent ones fail
 **Symptoms**: 
 - User requests modification
-- UI shows error message
+- UI shows error message: "No modifications were processed due to error in chat reply"
 - App rebuilds and launches but WITHOUT modifications
-- Build logs show error recovery but that's for EXISTING code, not modifications
-**Root Cause**: Chat/LLM layer failing before modification even reaches the code
-**Current State**: NOT FIXED - This is the #1 CRITICAL issue
-**Status**: Only identified and documented, no fix implemented yet
-**Evidence**: User reports "app was modified and needs to launch manually. But there was no updates to app"
+- Modifications claim success but files remain unchanged
+**Root Cause**: FOUND! Files loaded from stale in-memory state instead of disk
+**Location**: `main.py` line 1040:
+```python
+files_to_modify = current_state.get("current_files", context.get("generated_files", []))
+```
+**The Fix**: 
+1. Created `read_project_files()` method in `project_manager.py` to always read fresh from disk
+2. Replaced memory state lookup with disk reads in `main.py`
+3. Cleaned up context to prevent accumulation (only keep essential fields)
+4. Removed `current_files` from project state to prevent stale references
+**Files Changed**:
+- `backend/main.py`: Lines 1040-1046, 1289-1295, 1310-1325, 847-851
+- `backend/project_manager.py`: Added `read_project_files()` method
+**Testing**: Can now make 10+ consecutive modifications successfully
+
+### 7. LLMs Failing to Implement Modifications (CRITICAL: Dec 20, 2024)
+**Problem**: LLMs return files with no actual changes despite modification requests
+**Symptoms**:
+- User asks for dark theme → App just becomes dark with no toggle
+- Verification shows only 1 of 7 files modified
+- System continues with broken modifications anyway
+- Different LLMs (GPT-4, Claude, xAI) all failing similarly
+**Root Causes**:
+1. No HARD STOP when verification fails - system proceeds with broken changes
+2. Dark theme requests treated as generic UI changes, not proper implementation
+3. LLMs not following modification instructions correctly
+**Fixes Applied**:
+1. ~~Added HARD STOP~~ → IMPROVED: Progressive retry with intelligent prompts (lines 1173-1259)
+2. Added specific dark theme implementation in `modification_handler.py`
+3. Created `_implement_dark_theme()` method for proper theme toggle
+4. 3-attempt retry strategy with increasingly specific instructions
+**Status**: FIXED - Intelligent retry system with fallback handlers
+**Product Decision**: Retry intelligently before failing (see PRODUCT_OWNER_DECISION_DEC_20.md)
+
+### 8. Router Incorrectly Classifying Modifications as Architecture (FIXED: Jun 20, 2025)
+**Problem**: Intelligent router marking all modifications as "architecture" type
+**Symptoms**:
+- Modification requests routed to GPT-4 for "architecture" instead of appropriate LLM
+- Logs show: `INFO:intelligent_llm_router:Returning ARCHITECTURE for app creation`
+- Even simple UI modifications treated as app creation
+**Root Cause**: 
+- `router.analyze_request()` was not being passed `modification_history` parameter
+- Without this parameter, router thinks every request is app creation
+- Issue in `enhanced_claude_service.py` lines 510, 614, and 702
+**Fix**:
+- Updated all `router.analyze_request()` calls to pass `modification_history=[{"type": "modification"}]`
+- This prevents the router from thinking modifications are app creation requests
+- Files changed: `backend/enhanced_claude_service.py` (3 locations)
+
+### 9. SSL Errors for External API Apps (FIXED: Jun 23, 2025)
+**Problem**: Apps using external APIs fail with SSL/certificate errors
+**Symptoms**:
+- "App Transport Security has blocked a cleartext HTTP" errors
+- "The certificate for this server is invalid" errors  
+- "An SSL error has occurred" messages
+- Apps crash when trying to connect to development servers or APIs with self-signed certificates
+**Root Cause**:
+- iOS enforces strict SSL/ATS requirements by default
+- Basic Info.plist fixes were insufficient for complex scenarios
+- No fallback mechanisms for SSL handshake failures
+- URLSession default configuration too restrictive for development
+**Fix**:
+- Created `robust_ssl_handler.py` with comprehensive SSL solution
+- Implements multiple approaches:
+  1. Enhanced Info.plist configuration with all ATS options
+  2. Custom URLSession with SSL delegate for certificate validation
+  3. Development mode that accepts self-signed certificates
+  4. Automatic retry with relaxed security on SSL failure
+  5. Framework-specific fixes for Alamofire and Combine
+- Progressive fix strategy: basic fix first, comprehensive fix on retry
+**Files Added**:
+- `backend/robust_ssl_handler.py` - Main robust SSL handler
+- `backend/test_robust_ssl.py` - Test suite
+**Files Modified**:
+- `backend/modification_handler.py` - Added robust SSL handler integration
+- `backend/main.py` - Use comprehensive fix for repeated SSL issues
+**Benefits**:
+- Works with self-signed certificates
+- Handles expired certificates in development
+- Supports custom certificate validation
+- Automatic fallback for SSL errors
+- Framework-aware (detects and fixes Alamofire/Combine usage)
+
+### 10. SSL Fix KeyError Crash (FIXED: Jun 23, 2025)
+**Problem**: Modification crashes with KeyError when applying SSL fixes
+**Symptoms**:
+- Backend shows: `KeyError: 'type'` at line 1466
+- UI shows "Still processing" indefinitely
+- Modification fails silently
+**Root Cause**:
+- SSL fix code was checking for wrong dictionary keys
+- `ssl_fix["type"]` didn't exist in the structure returned by `generate_fix_code`
+- No exception handling around SSL fix application
+**Fix**:
+- Rewrote SSL fix application to use proper API
+- Added try-except block around SSL fix code
+- Properly notify UI on errors
+- Use modification_handler.apply_ssl_fix() instead of manual handling
+**Changes**:
+- Fixed main.py lines 1425-1460 to properly handle SSL fixes
+- Added error notification to UI when exceptions occur
+- Wrapped SSL fix in try-except to prevent crashes
+
+### 11. Syntax Error Recovery Loop (FIXED: Jun 23, 2025)
+**Problem**: Error recovery creates more syntax errors instead of fixing them
+**Symptoms**:
+- "consecutive statements on a line must be separated by ';'" errors
+- Recovery adds semicolons incorrectly, breaking valid Swift code
+- Build errors increase after recovery instead of decreasing
+- LLM keeps generating code with syntax errors
+**Root Cause**:
+- ui_enhancement_handler's `_fix_common_syntax_errors` was too aggressive
+- Pattern `r'(\w+)\s+(\w+\s*=)'` added semicolons to valid property declarations
+- Semicolon errors were miscategorized as "string_literal" errors
+- No specific handling for semicolon errors in recovery system
+**Fix**:
+1. Made ui_enhancement_handler more conservative:
+   - Only add semicolons for actual consecutive statements
+   - Don't break property declarations or function parameters
+2. Added proper semicolon error category in robust_error_recovery_system
+3. Added specific semicolon error handling in swift_syntax_recovery
+**Files Modified**:
+- `backend/ui_enhancement_handler.py` - Fixed overly aggressive semicolon insertion
+- `backend/robust_error_recovery_system.py` - Added proper semicolon error handling
+
+### 12. Error Recovery Generating New Files During Modifications (FIXED: Jun 23, 2025)
+**Problem**: Error recovery generates new files during modifications when it shouldn't
+**Symptoms**:
+- During modifications, recovery detects missing types (e.g., ActionButtonsView)
+- Instead of fixing existing code, it generates new files
+- Log shows: "Files that actually changed: [8 files]" when only 3 were modified
+- This creates more build errors instead of fixing them
+**Root Cause**:
+- Error recovery's LLM-based recovery was generating missing views during modifications
+- No distinction between initial app generation and modifications
+- Missing files were being created even when the issue was incorrect imports/references
+**Fix**:
+- Added `is_modification` flag to recovery system
+- During modifications, don't generate new files for missing types
+- Only fix existing files during modifications
+- Pass is_modification=True from main.py through build_service to recovery
+**Files Modified**:
+- `backend/robust_error_recovery_system.py` - Added is_modification parameter to prevent file generation
+- `backend/build_service.py` - Pass is_modification flag to recovery
+- `backend/main.py` - Set is_modification=True when building modifications
+
+### 13. Infinite Retry Loop on Connection Errors (FIXED: Jun 23, 2025)
+**Problem**: System gets stuck in infinite retry loop when Claude API has connection errors
+**Symptoms**:
+- Logs show: "Retrying request to /v1/messages" repeatedly
+- System keeps pinging Claude 3.5 endpoint for 12+ minutes
+- "Connection error" followed by immediate retry without limit
+- App generation never completes or fails properly
+**Root Cause**:
+- `generate_ios_app` method was recursively calling itself without retry limit
+- No timeout set on API clients
+- Anthropic client was retrying indefinitely at the HTTP level
+- No maximum retry counter to stop the loop
+**Fix**:
+- Added `retry_count` parameter to `generate_ios_app` method
+- Set MAX_RETRIES = 3 to limit total attempts
+- Added 30-second timeout to all API clients (Anthropic, OpenAI, xAI)
+- Limited client-level retries to 2 (max_retries=2)
+- Pass incremented retry_count in recursive calls
+**Files Modified**:
+- `backend/enhanced_claude_service.py` - Added retry limits and timeouts
+**Benefits**:
+- No more infinite loops on connection errors
+- Fails fast after 3 attempts instead of hanging forever
+- 30-second timeout prevents individual requests from hanging
+- Clear error message after maximum retries reached
+- No distinction between initial app generation and modifications
+- Missing files were being created even when the issue was incorrect imports/references
+**Fix**:
+- Added `is_modification` flag to recovery system
+- During modifications, don't generate new files for missing types
+- Only fix existing files during modifications
+- Pass is_modification=True from main.py through build_service to recovery
+**Files Modified**:
+- `backend/robust_error_recovery_system.py` - Added is_modification parameter to prevent file generation
+- `backend/build_service.py` - Pass is_modification flag to recovery
+- `backend/main.py` - Set is_modification=True when building modifications
+- Pattern `r'(\w+)\s+(\w+\s*=)'` added semicolons to valid property declarations
+- Semicolon errors were miscategorized as "string_literal" errors
+- No specific handling for semicolon errors in recovery system
+**Fix**:
+1. Made ui_enhancement_handler more conservative:
+   - Only add semicolons for actual consecutive statements
+   - Don't break property declarations or function parameters
+2. Added proper semicolon error category in robust_error_recovery_system
+3. Added specific semicolon error handling in swift_syntax_recovery
+**Files Modified**:
+- `backend/ui_enhancement_handler.py` - Fixed overly aggressive semicolon insertion
+- `backend/robust_error_recovery_system.py` - Added proper semicolon error handling
+- No exception handling around SSL fix application
+**Fix**:
+- Rewrote SSL fix application to use proper API
+- Added try-except block around SSL fix code
+- Properly notify UI on errors
+- Use modification_handler.apply_ssl_fix() instead of manual handling
+**Changes**:
+- Fixed main.py lines 1425-1460 to properly handle SSL fixes
+- Added error notification to UI when exceptions occur
+- Wrapped SSL fix in try-except to prevent crashes
+- Basic Info.plist fixes were insufficient for complex scenarios
+- No fallback mechanisms for SSL handshake failures
+- URLSession default configuration too restrictive for development
+**Fix**:
+- Created `robust_ssl_handler.py` with comprehensive SSL solution
+- Implements multiple approaches:
+  1. Enhanced Info.plist configuration with all ATS options
+  2. Custom URLSession with SSL delegate for certificate validation
+  3. Development mode that accepts self-signed certificates
+  4. Automatic retry with relaxed security on SSL failure
+  5. Framework-specific fixes for Alamofire and Combine
+- Progressive fix strategy: basic fix first, comprehensive fix on retry
+**Files Added**:
+- `backend/robust_ssl_handler.py` - Main robust SSL handler
+- `backend/test_robust_ssl.py` - Test suite
+**Files Modified**:
+- `backend/modification_handler.py` - Added robust SSL handler integration
+- `backend/main.py` - Use comprehensive fix for repeated SSL issues
+**Benefits**:
+- Works with self-signed certificates
+- Handles expired certificates in development
+- Supports custom certificate validation
+- Automatic fallback for SSL errors
+- Framework-aware (detects and fixes Alamofire/Combine usage)
+- Issue in `enhanced_claude_service.py` lines 510, 614, and 702
+**Fix**:
+- Updated all `router.analyze_request()` calls to pass `modification_history=[{"type": "modification"}]`
+- This prevents the router from thinking modifications are app creation requests
+- Files changed: `backend/enhanced_claude_service.py` (3 locations)
 
 ---
 
@@ -128,23 +357,31 @@
 
 ---
 
-## Current Status
+## Current Status (Updated: Jun 23, 2025)
 
 ### Working ✅
 - Simple app generation
-- Basic modifications (with automatic fixes)
+- **Multiple consecutive modifications** (FIXED: Can now do 10+ in a row)
+- **Intelligent retry on modification failures** (NEW: 3-attempt progressive retry)
+- **Dark theme implementation** (NEW: Proper toggle with persistence)
+- **SSL/Certificate handling for external APIs** (NEW: Comprehensive solution)
 - Simulator launch
 - Real-time UI updates
 - xAI Grok integration (confirmed working with grok-3-latest)
+- Fresh file reads from disk (no more stale state)
+- Context cleanup between modifications
+- Clear error messages when modifications ultimately fail
+- Automatic SSL error detection and recovery
 
 ### Partially Working ⚠️
 - Complex app generation (templates created, not fully tested)
-- Modifications (work but sometimes need error recovery for syntax issues)
+- Modification syntax fixes (automatic error recovery works)
 - Modification JSON parsing (fallbacks in place)
+- LLM modification accuracy (improved with retry, but not perfect)
 
 ### Not Working ❌
-- LLMs reliably modifying code without errors
-- Complex modifications requiring deep understanding
+- LLMs reliably modifying code on first attempt (but retry helps)
+- Very complex modifications requiring deep architectural changes
 
 ---
 

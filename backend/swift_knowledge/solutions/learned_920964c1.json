@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: Sources/Models/Quote.swift:11:9: error: cannot fin...",
+  "content": "Error: Sources/Models/Quote.swift:11:9: error: cannot find 'this' in scope; Sources/Services/QuoteService.swift:16:13: error: invalid redeclaration of 'response'; The following build commands failed:\n\nSolution: Fixed 3 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 3 errors using RAG patterns"
+  ]
+}

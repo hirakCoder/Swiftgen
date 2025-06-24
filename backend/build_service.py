@@ -173,7 +173,7 @@ class BuildService:
             except Exception as e:
                 print(f"Error in status callback: {e}")
 
-    async def build_project(self, project_path: str, project_id: str, bundle_id: str, app_complexity: str = None) -> BuildResult:
+    async def build_project(self, project_path: str, project_id: str, bundle_id: str, app_complexity: str = None, is_modification: bool = False) -> BuildResult:
         """Build iOS project with multiple recovery strategies"""
 
         start_time = datetime.now()
@@ -185,6 +185,9 @@ class BuildService:
         if self.error_recovery_system:
             self.error_recovery_system.reset_attempted_fixes()
             print(f"[BUILD] Reset error recovery attempts for fresh start")
+            # Also ensure iOS 16 constraints are enforced
+            if hasattr(self.error_recovery_system, 'ios_target_version'):
+                self.error_recovery_system.ios_target_version = "16.0"
         
         # Set max attempts based on complexity
         if app_complexity:
@@ -474,11 +477,72 @@ class BuildService:
                         success, fixed_files, fixes = await self.error_recovery_system.recover_from_errors(
                             errors=unique_errors,
                             swift_files=swift_files,  # CORRECT PARAMETER NAME
-                            bundle_id=bundle_id
+                            bundle_id=bundle_id,
+                            is_modification=is_modification
                         )
 
                         if success and fixed_files:
                             print(f"[BUILD] Recovery succeeded with {len(fixed_files)} fixed files")
+                            
+                            # CRITICAL: Check if we actually have new files for missing types
+                            existing_files = {f["path"] for f in swift_files}
+                            new_files = [f for f in fixed_files if f["path"] not in existing_files]
+                            
+                            if new_files:
+                                print(f"[BUILD] Recovery created {len(new_files)} NEW files: {[f['path'] for f in new_files]}")
+                            else:
+                                print(f"[BUILD] WARNING: Recovery did not create any new files despite missing type errors")
+                                
+                                # Extract missing files that need to be created
+                                missing_files = []
+                                for error in unique_errors:
+                                    if "cannot find" in error and "in scope" in error:
+                                        match = re.search(r"cannot find '(\w+)' in scope", error)
+                                        if match:
+                                            missing_type = match.group(1)
+                                            if missing_type.endswith("View"):
+                                                view_path = f"Sources/Views/{missing_type}.swift"
+                                                if not any(f["path"] == view_path for f in fixed_files):
+                                                    missing_files.append((missing_type, view_path))
+                                
+                                if missing_files and self.error_recovery_system:
+                                    print(f"[BUILD] Asking LLM to create {len(missing_files)} missing files")
+                                    await self._update_status(f"🤖 Creating {len(missing_files)} missing files...")
+                                    
+                                    # Create a specific request for the missing files
+                                    missing_files_request = "Create the following missing SwiftUI files that are referenced in the app:\n\n"
+                                    for view_name, view_path in missing_files:
+                                        missing_files_request += f"- {view_path}: A SwiftUI View named {view_name}\n"
+                                    
+                                    missing_files_request += "\nIMPORTANT:\n"
+                                    missing_files_request += "1. Look at the existing files to understand the app's purpose and structure\n"
+                                    missing_files_request += "2. Create views that fit the app's functionality\n"
+                                    missing_files_request += "3. Include proper SwiftUI imports and view structure\n"
+                                    missing_files_request += "4. Make the views functional, not just placeholders\n\n"
+                                    missing_files_request += "Existing app context:\n"
+                                    
+                                    # Include some context from existing files
+                                    for file in swift_files[:3]:  # First 3 files for context
+                                        if "ContentView" in file["path"] or "App.swift" in file["path"]:
+                                            missing_files_request += f"\n{file['path']}:\n{file['content'][:500]}...\n"
+                                    
+                                    # Ask LLM to create the missing files
+                                    retry_success, created_files, _ = await self.error_recovery_system.recover_from_errors(
+                                        errors=[missing_files_request],
+                                        swift_files=swift_files,
+                                        bundle_id=bundle_id,
+                                        is_modification=is_modification
+                                    )
+                                    
+                                    if retry_success and created_files:
+                                        # Add the newly created files to fixed_files
+                                        for new_file in created_files:
+                                            if new_file["path"] not in existing_files:
+                                                fixed_files.append(new_file)
+                                        print(f"[BUILD] LLM created {len(created_files)} missing files")
+                                    else:
+                                        print(f"[BUILD] LLM retry failed, proceeding without missing files")
+                            
                             await self._update_status(f"📝 Writing {len(fixed_files)} fixed files...")
                             
                             # Use file structure manager for organized writing and verification

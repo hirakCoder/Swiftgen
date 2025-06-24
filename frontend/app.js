@@ -213,12 +213,9 @@ class SwiftGenChat {
                     this.addMessage('assistant', "Please wait for the current operation to complete before creating a new app.");
                 }
             } else if ((intent.type === 'modify_app' || intent.type === 'create_app') && this.currentProjectId) {
-                // Any request when a project exists should be treated as modification
-                if (!this.isProcessing) {
-                    await this.modifyExistingApp(message);
-                } else {
-                    this.addMessage('assistant', "Please wait for the current modification to complete before requesting another change.");
-                }
+                // Modifications are now handled via WebSocket
+                // The server will process and send real-time updates
+                this.isProcessing = true;
             } else if (intent.type === 'question') {
                 this.handleQuestion(message);
             } else {
@@ -370,6 +367,9 @@ class SwiftGenChat {
         
         // Increment modification count
         this.modificationCount++;
+        
+        // CRITICAL: Reset generationComplete so progress shows for modifications
+        this.generationComplete = false;
         
         // Initialize modification-specific progress
         this.initializeModificationProgress();
@@ -583,20 +583,51 @@ class SwiftGenChat {
 
     handleWebSocketMessage(message) {
         console.log('WebSocket message:', message);
+        
+        // Ensure we have the necessary elements
+        const progressText = document.getElementById('progressText');
+        const progressContainer = document.getElementById('progressContainer');
 
         switch (message.type) {
             case 'connected':
                 // Ignore connection messages - user doesn't need to see this
                 break;
             case 'status':
-                // Show progress for status updates during generation
-                if (!this.generationComplete) {
-                    this.showProgress();
+                // CRITICAL: Reset generationComplete for any status update
+                this.generationComplete = false;
+                
+                // Always show progress for status updates
+                if (progressContainer && progressContainer.classList.contains('hidden')) {
+                    progressContainer.classList.remove('hidden');
                 }
+                this.showProgress();
+                
+                // CRITICAL: Update progress text immediately for all status messages
+                if (progressText && message.message) {
+                    progressText.textContent = message.message;
+                    console.log('Updated progress text to:', message.message);
+                } else {
+                    console.warn('Progress text element not found or no message:', {
+                        progressTextElement: progressText,
+                        message: message.message,
+                        progressTextId: document.getElementById('progressText')
+                    });
+                }
+                
+                // Also handle through normal flow
                 this.handleStatusUpdate(message.message);
-                // Update status bar too
-                if (message.status === 'generating' || message.status === 'building') {
+                
+                // Update status bar based on status type
+                if (message.status === 'generating' || message.status === 'building' || 
+                    message.status === 'modifying' || message.status === 'analyzing' ||
+                    message.status === 'retrying' || message.status === 'validating' ||
+                    message.status === 'healing' || message.status === 'initializing') {
                     this.updateStatus('processing', message.message);
+                    this.isProcessing = true;
+                } else if (message.status === 'error') {
+                    this.updateStatus('error', message.message);
+                    this.hideProgress();
+                    this.isProcessing = false;
                 }
                 break;
             case 'complete':
@@ -667,16 +698,22 @@ class SwiftGenChat {
                 this.addMessage('assistant', message.message);
                 break;
             case 'trigger_modification':
-                // Automatically trigger modification based on intelligent chat analysis
-                if (message.data && message.data.project_id) {
-                    if (!this.isProcessing) {
-                        this.modifyExistingApp(message.data.modification);
-                    } else {
-                        this.addMessage('assistant', 'Please wait for the current modification to complete.');
-                    }
-                }
+                // DEPRECATED - modifications now happen server-side
+                console.log('Received deprecated trigger_modification message');
                 break;
             case 'code_generated':
+                if (message.files) {
+                    this.generatedFiles = message.files;
+                    this.displayGeneratedCode(message.files);
+                }
+                break;
+            case 'modification_complete':
+                // Handle modification completion
+                this.hideProgress();
+                this.isProcessing = false;
+                if (message.message) {
+                    this.addMessage('assistant', message.message);
+                }
                 if (message.files) {
                     this.generatedFiles = message.files;
                     this.displayGeneratedCode(message.files);
@@ -688,12 +725,22 @@ class SwiftGenChat {
     handleStatusUpdate(statusMessage) {
         console.log('Status update:', statusMessage);
 
+        // Initialize modification progress if this is a modification
+        if ((statusMessage.includes('modification') || statusMessage.includes('Modification') || 
+             statusMessage.includes('Refining') || statusMessage.includes('retry')) && 
+            (!this.progressSteps.generate || this.progressSteps.generate.text !== 'Analyzing modification...')) {
+            this.initializeModificationProgress();
+        }
+
         // Update progress based on status message - handle both creation and modification
-        if (statusMessage.includes('Analyzing')) {
+        if (statusMessage.includes('Analyzing') || statusMessage.includes('analyzing')) {
             this.updateProgress('generate', 10);
         } else if (statusMessage.includes('modification request')) {
             // Modification-specific
             this.updateProgress('generate', 15);
+        } else if (statusMessage.includes('Refining implementation')) {
+            // Retry attempts
+            this.updateProgress('generate', 25);
         } else if (statusMessage.includes('Updating') || statusMessage.includes('Modifying')) {
             // Modification-specific
             this.updateProgress('create', 40);

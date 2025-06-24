@@ -50,6 +50,9 @@ class EnhancedClaudeService:
         # Initialize intelligent router
         self.router = IntelligentLLMRouter() if IntelligentLLMRouter else None
         self.failure_count = {}  # Track failures per request
+        
+        # Progress callback for real-time updates
+        self.progress_callback = None
 
         # Define ALL supported models - UPDATED WITH CORRECT MODEL NAMES
         self.supported_models = [
@@ -106,18 +109,28 @@ class EnhancedClaudeService:
         """Initialize API client for the given provider"""
         try:
             if provider == "anthropic" and provider not in self._clients:
-                self._clients["anthropic"] = anthropic.Anthropic(api_key=self.api_keys["anthropic"])
+                self._clients["anthropic"] = anthropic.Anthropic(
+                    api_key=self.api_keys["anthropic"],
+                    timeout=30.0,  # 30 second timeout
+                    max_retries=2  # Limit retries at the client level
+                )
                 return True
             elif provider == "openai" and provider not in self._clients:
                 from openai import OpenAI
-                self._clients["openai"] = OpenAI(api_key=self.api_keys["openai"])
+                self._clients["openai"] = OpenAI(
+                    api_key=self.api_keys["openai"],
+                    timeout=30.0,  # 30 second timeout
+                    max_retries=2  # Limit retries at the client level
+                )
                 return True
             elif provider == "xai" and provider not in self._clients:
                 # xAI uses OpenAI-compatible API
                 from openai import OpenAI
                 self._clients["xai"] = OpenAI(
                     api_key=self.api_keys.get("xai", ""),
-                    base_url="https://api.x.ai/v1"
+                    base_url="https://api.x.ai/v1",
+                    timeout=30.0,  # 30 second timeout
+                    max_retries=2  # Limit retries at the client level
                 )
                 return True
             return provider in self._clients
@@ -138,11 +151,21 @@ class EnhancedClaudeService:
         else:
             logger.error(f"Provider {provider} not available")
             return False
+    
+    def set_progress_callback(self, callback):
+        """Set a callback function for progress updates"""
+        self.progress_callback = callback
 
-    async def generate_ios_app(self, description: str, app_name: str = None) -> Dict[str, Any]:
+    async def generate_ios_app(self, description: str, app_name: str = None, retry_count: int = 0) -> Dict[str, Any]:
         """Generate iOS app code using the best available LLM"""
         if not self.available_models:
             raise Exception("No LLM model available")
+        
+        # Prevent infinite retry loops
+        MAX_RETRIES = 3
+        if retry_count >= MAX_RETRIES:
+            logger.error(f"Maximum retries ({MAX_RETRIES}) reached. Stopping.")
+            raise Exception(f"Failed to generate app after {MAX_RETRIES} attempts")
         
         app_name = app_name or "MyApp"
         
@@ -228,6 +251,10 @@ Return a JSON response with this EXACT structure:
 }}"""
 
         try:
+            # Send initial progress update
+            if self.progress_callback:
+                await self.progress_callback(f"🚀 Starting app generation with {self.current_model.name}...")
+            
             result = await self._generate_with_current_model(system_prompt, user_prompt)
 
             # Parse JSON response
@@ -282,8 +309,9 @@ Return a JSON response with this EXACT structure:
                     )
                     
                     try:
-                        return await self.generate_ios_app(description, app_name)
-                    except:
+                        return await self.generate_ios_app(description, app_name, retry_count + 1)
+                    except Exception as e:
+                        logger.error(f"Retry with {self.current_model.name} failed: {str(e)}")
                         pass
             
             # Fallback to sequential retry
@@ -292,8 +320,9 @@ Return a JSON response with this EXACT structure:
                     self.current_model = model
                     logger.info(f"Retrying with {model.name}")
                     try:
-                        return await self.generate_ios_app(description, app_name)
-                    except:
+                        return await self.generate_ios_app(description, app_name, retry_count + 1)
+                    except Exception as e:
+                        logger.error(f"Sequential retry with {model.name} failed: {str(e)}")
                         continue
 
             raise Exception(f"All LLM models failed. Last error: {str(e)}")
@@ -313,7 +342,15 @@ Return a JSON response with this EXACT structure:
         """Generate text using Claude"""
         import anthropic
 
-        client = anthropic.Anthropic(api_key=self.api_keys["anthropic"])
+        client = anthropic.Anthropic(
+            api_key=self.api_keys["anthropic"],
+            timeout=30.0,  # 30 second timeout
+            max_retries=2  # Limit retries at the client level
+        )
+        
+        # Send progress update before starting
+        if self.progress_callback:
+            await self.progress_callback("🤖 Claude is analyzing your requirements...")
 
         message = client.messages.create(
             model=self.current_model.model_id,
@@ -324,6 +361,10 @@ Return a JSON response with this EXACT structure:
                 {"role": "user", "content": user_prompt}
             ]
         )
+        
+        # Send progress update after generation
+        if self.progress_callback:
+            await self.progress_callback("✨ Claude has generated the app architecture...")
 
         return message.content[0].text
 
@@ -332,6 +373,10 @@ Return a JSON response with this EXACT structure:
         from openai import OpenAI
         
         client = OpenAI(api_key=self.api_keys["openai"])
+        
+        # Send progress update before starting
+        if self.progress_callback:
+            await self.progress_callback("🤖 GPT-4 is analyzing your requirements...")
         
         response = client.chat.completions.create(
             model=self.current_model.model_id,
@@ -342,6 +387,10 @@ Return a JSON response with this EXACT structure:
             max_tokens=self.current_model.max_tokens,
             temperature=self.current_model.temperature
         )
+        
+        # Send progress update after generation
+        if self.progress_callback:
+            await self.progress_callback("✨ GPT-4 has generated the app architecture...")
 
         return response.choices[0].message.content
 
@@ -358,6 +407,10 @@ Return a JSON response with this EXACT structure:
                 base_url="https://api.x.ai/v1"
             )
             
+            # Send progress update before starting
+            if self.progress_callback:
+                await self.progress_callback("🤖 xAI Grok is analyzing your requirements...")
+            
             # Create chat completion using Grok
             response = xai_client.chat.completions.create(
                 model=self.current_model.model_id,  # grok-3-latest
@@ -368,6 +421,10 @@ Return a JSON response with this EXACT structure:
                 max_tokens=self.current_model.max_tokens,
                 temperature=self.current_model.temperature
             )
+            
+            # Send progress update after generation
+            if self.progress_callback:
+                await self.progress_callback("✨ xAI Grok has generated the app architecture...")
             
             return response.choices[0].message.content
             
@@ -463,7 +520,8 @@ Return ONLY the app name, nothing else. No explanation or quotes."""
         if self.router:
             # Analyze modification to determine best LLM
             available_providers = [model.provider for model in self.available_models]
-            selected_provider = self.router.route_initial_request(modification, available_providers=available_providers)
+            # CRITICAL: Pass is_modification=True to prevent router from thinking this is app creation
+            selected_provider = self.router.route_initial_request(modification, available_providers=available_providers, is_modification=True)
             if selected_provider in self.models:
                 self.current_model = self.models[selected_provider]
                 logger.info(f"[ROUTER] Selected {self.current_model.name} for modification: {modification[:50]}...")
@@ -471,7 +529,8 @@ Return ONLY the app name, nothing else. No explanation or quotes."""
             # Create specialized prompt if router available
             strategy = "standard approach"
             if self.router:
-                request_type = self.router.analyze_request(modification)
+                # CRITICAL: Pass modification_history to indicate this is a modification
+                request_type = self.router.analyze_request(modification, modification_history=[{"type": "modification"}])
                 specialized_prompt = self.router.create_specialized_prompt(
                     self.current_model.provider,
                     strategy,
@@ -495,18 +554,26 @@ IMPORTANT RULES:
 6. If fixing "cannot find X in scope" errors, CREATE the missing file/type
 7. When creating new files, add them to the files array in your response
 
-CRITICAL iOS VERSION CONSTRAINTS:
-- Target iOS: 16.0
-- DO NOT use features only available in iOS 17.0 or newer:
-  * NO .symbolEffect() - use .scaleEffect or .opacity animations instead
-  * NO .bounce effects - use .animation(.spring()) instead
-  * NO @Observable macro - use ObservableObject + @Published
-  * NO .scrollBounceBehavior modifier
-  * NO .contentTransition modifier
-- If unsure about iOS availability, use iOS 16-compatible alternatives
+CRITICAL iOS VERSION CONSTRAINTS (HIGHEST PRIORITY):
+- Target iOS: 16.0 ONLY - This is NON-NEGOTIABLE
+- FORBIDDEN iOS 17+ features that MUST NOT be used:
+  * NO .symbolEffect() → use .scaleEffect or .opacity animations instead
+  * NO .bounce effects → use .animation(.spring()) instead
+  * NO @Observable macro → use ObservableObject + @Published
+  * NO .scrollBounceBehavior modifier → remove it entirely
+  * NO .contentTransition modifier → use regular transitions
+  * NO ContentUnavailableView → create custom empty state views
+  * NO AnyShapeStyle → use concrete types like Color or LinearGradient
+  * NO NavigationStack with complex path → use NavigationView for simple navigation
+  * NO .scrollTargetBehavior → not available in iOS 16
+  * NO .scrollPosition → use ScrollViewReader instead
+  * NO .scrollClipDisabled → not available in iOS 16
+  * NO .sensoryFeedback → use UIKit haptics if needed
+- ALWAYS check iOS availability before using ANY modifier
+- When in doubt, use the iOS 15/16 compatible approach
 
 MODERN SWIFT PATTERNS (MANDATORY):
-1. Navigation: Use NavigationStack, NOT NavigationView (deprecated)
+1. Navigation: Use NavigationStack for iOS 16+ (simple cases only), NavigationView as fallback
 2. State Management: ObservableObject + @Published for iOS 16
 3. Async/Await: ALWAYS use async/await, NEVER completion handlers
 4. UI Updates: Mark UI classes/methods with @MainActor
@@ -567,7 +634,8 @@ IMPORTANT: The "changes_made" array must contain SPECIFIC, CONCRETE changes you 
             # Intelligent fallback for modifications
             if self.router and self.current_model:
                 self.failure_count[request_id] += 1
-                request_type = self.router.analyze_request(modification)
+                # CRITICAL: Pass modification_history to indicate this is a modification
+                request_type = self.router.analyze_request(modification, modification_history=[{"type": "modification"}])
                 
                 # Get fallback strategy
                 next_provider, strategy = self.router.get_fallback_strategy(
@@ -655,7 +723,8 @@ IMPORTANT: The "changes_made" array must contain SPECIFIC, CONCRETE changes you 
 
         # Record success if using router
         if self.router and isinstance(result, dict):
-            request_type = self.router.analyze_request(modification)
+            # CRITICAL: Pass modification_history to indicate this is a modification
+            request_type = self.router.analyze_request(modification, modification_history=[{"type": "modification"}])
             self.router.record_result(
                 self.current_model.provider,
                 request_type,
@@ -738,6 +807,12 @@ IMPORTANT: The "changes_made" array must contain SPECIFIC, CONCRETE changes you 
                 "modified_by_llm": self.current_model.provider if self.current_model else "claude"
             }
         
+        # Post-process to remove iOS 17 features before returning
+        if isinstance(result, dict) and "files" in result:
+            for file in result["files"]:
+                if "content" in file:
+                    file["content"] = self._remove_ios17_features_from_content(file["content"])
+        
         return result
 
     async def modify_ios_app_multi_llm(self, *args, **kwargs):
@@ -773,3 +848,102 @@ IMPORTANT: The "changes_made" array must contain SPECIFIC, CONCRETE changes you 
                 "type": "general",
                 "guidance": "Make the requested modification while preserving all existing functionality."
             }
+    
+    def _remove_ios17_features_from_content(self, content: str) -> str:
+        """Remove or replace iOS 17+ features with iOS 16 alternatives"""
+        
+        # Replace .symbolEffect with animation alternatives
+        content = re.sub(
+            r'\.symbolEffect\([^)]*\)',
+            '.scaleEffect(1.1).animation(.easeInOut(duration: 0.3), value: true)',
+            content
+        )
+        
+        # Replace .bounce with spring animation
+        content = re.sub(
+            r'\.bounce\b',
+            '.animation(.spring())',
+            content
+        )
+        
+        # Replace @Observable with ObservableObject
+        content = re.sub(
+            r'@Observable\s+class\s+(\w+)',
+            r'class \1: ObservableObject',
+            content
+        )
+        
+        # Remove .scrollBounceBehavior
+        content = re.sub(
+            r'\.scrollBounceBehavior\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Remove .contentTransition
+        content = re.sub(
+            r'\.contentTransition\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Replace ContentUnavailableView with custom implementation
+        if 'ContentUnavailableView' in content:
+            content = re.sub(
+                r'ContentUnavailableView\([^}]+\}',
+                '''VStack(spacing: 16) {
+                    Image(systemName: "tray")
+                        .font(.system(size: 50))
+                        .foregroundColor(.gray)
+                    Text("No Content Available")
+                        .font(.headline)
+                        .foregroundColor(.gray)
+                }''',
+                content
+            )
+        
+        # Replace AnyShapeStyle with Color
+        content = re.sub(
+            r':\s*any\s+ShapeStyle|:\s*AnyShapeStyle',
+            ': Color',
+            content
+        )
+        
+        # Remove .scrollTargetBehavior
+        content = re.sub(
+            r'\.scrollTargetBehavior\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Remove .scrollPosition
+        content = re.sub(
+            r'\.scrollPosition\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Remove .scrollClipDisabled
+        content = re.sub(
+            r'\.scrollClipDisabled\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Remove .sensoryFeedback
+        content = re.sub(
+            r'\.sensoryFeedback\([^)]*\)',
+            '',
+            content
+        )
+        
+        # Replace NavigationStack with NavigationView for complex cases
+        if 'NavigationStack' in content and 'path:' in content:
+            # Complex NavigationStack with path binding - replace with NavigationView
+            content = re.sub(
+                r'NavigationStack\(path:\s*[^)]+\)\s*\{',
+                'NavigationView {',
+                content
+            )
+        
+        return content

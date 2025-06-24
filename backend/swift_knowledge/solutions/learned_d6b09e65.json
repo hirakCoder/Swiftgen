@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: Sources/App.swift:5:29: error: expected pattern; S...",
+  "content": "Error: Sources/App.swift:5:29: error: expected pattern; Sources/App.swift:5:31: error: expected 'var' keyword in property declaration; Sources/ViewModels/QuoteViewModel.swift:12:16: error: expected pattern\n\nSolution: Fixed 7 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 7 errors using RAG patterns"
+  ]
+}

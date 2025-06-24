@@ -501,6 +501,35 @@ class ProjectManager:
                         except Exception as e:
                             print(f"[PROJECT MANAGER] Error removing duplicate: {e}")
 
+    async def read_project_files(self, project_id: str) -> List[Dict]:
+        """Read all Swift files from disk for a project"""
+        project_path = await self.get_project_path(project_id)
+        if not project_path:
+            return []
+        
+        files = []
+        sources_dir = os.path.join(project_path, "Sources")
+        
+        if os.path.exists(sources_dir):
+            for root, dirs, filenames in os.walk(sources_dir):
+                for filename in filenames:
+                    if filename.endswith('.swift'):
+                        file_path = os.path.join(root, filename)
+                        relative_path = os.path.relpath(file_path, project_path)
+                        
+                        try:
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                                files.append({
+                                    "path": relative_path,
+                                    "content": content
+                                })
+                        except Exception as e:
+                            print(f"[PROJECT MANAGER] Error reading {relative_path}: {e}")
+        
+        print(f"[PROJECT MANAGER] Read {len(files)} files from disk for project {project_id}")
+        return files
+
     async def get_project_path(self, project_id: str) -> Optional[str]:
         """Get the path to a project"""
         project_path = os.path.join(self.workspaces_dir, project_id)

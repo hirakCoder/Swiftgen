@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  swiftgen:
+    build: .
+    ports:
+      - "8002:8002"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - XAI_API_KEY=${XAI_API_KEY}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./workspaces:/app/workspaces
+      - ./logs:/app/logs
+      - ./backend:/app/backend:ro
+      - ./frontend:/app/frontend:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+  
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+  
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=swiftgen
+      - POSTGRES_PASSWORD=swiftgen_password
+      - POSTGRES_DB=swiftgen_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swiftgen"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis_data:
+  postgres_data:

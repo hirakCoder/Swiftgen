@@ -230,10 +230,23 @@ class UIEnhancementHandler:
         """Fix common SwiftUI syntax errors"""
         
         # Fix missing semicolons (consecutive statements on same line)
-        # Pattern: word followed by another word with assignment
-        content = re.sub(r'(\w+)\s+(\w+\s*=)', r'\1; \2', content)
-        # Pattern: closing paren followed by statement
-        content = re.sub(r'(\))\s+([a-zA-Z]\w*\s*[=\(])', r'\1; \2', content)
+        # Be VERY careful - only add semicolons where truly needed
+        # Don't break valid Swift syntax like property declarations or function calls
+        
+        # Pattern 1: Two complete statements on the same line (very specific)
+        # e.g., "let x = 5 let y = 6" -> "let x = 5; let y = 6"
+        content = re.sub(r'(let\s+\w+\s*=\s*[^;]+)(\s+)(let\s+)', r'\1;\2\3', content)
+        content = re.sub(r'(var\s+\w+\s*=\s*[^;]+)(\s+)(var\s+)', r'\1;\2\3', content)
+        
+        # Pattern 2: Function call followed by another statement
+        # e.g., "doSomething() let x = 5" -> "doSomething(); let x = 5"
+        content = re.sub(r'(\w+\(\))(\s+)(let\s+|var\s+|if\s+|for\s+|while\s+)', r'\1;\2\3', content)
+        
+        # DO NOT add semicolons in these cases:
+        # - Property declarations (e.g., "@State private var")
+        # - Function parameters
+        # - Closure parameters
+        # - Type annotations
         
         # Fix duplicate modifiers
         content = re.sub(r'(\.transition\([^)]+\)\s*\.animation\([^)]+\))\s*\1', r'\1', content)

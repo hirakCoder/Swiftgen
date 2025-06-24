@@ -6,6 +6,8 @@ import json
 import re
 from typing import List, Dict, Tuple, Optional
 from difflib import unified_diff
+from datetime import datetime
+from collections import defaultdict
 
 # Import UI enhancement handler
 try:
@@ -14,11 +16,34 @@ try:
 except ImportError:
     ui_handler = None
 
+# Import SSL and iOS specific handlers
+try:
+    from ssl_error_handler import SSLErrorHandler
+    from ios_specific_fixes import IOSSpecificFixes, IssueCategory
+    ssl_handler = SSLErrorHandler()
+    ios_fixes = IOSSpecificFixes()
+except ImportError:
+    ssl_handler = None
+    ios_fixes = None
+
+# Import robust SSL handler
+try:
+    from robust_ssl_handler import RobustSSLHandler
+    robust_ssl_handler = RobustSSLHandler()
+except ImportError:
+    robust_ssl_handler = None
+
 class ModificationHandler:
     """Handles the modification process to ensure changes are applied correctly"""
     
     def __init__(self):
         self.verbose = True
+        # Track modification history
+        self.modification_history = []
+        # Track repeated issues
+        self.issue_tracker = defaultdict(list)
+        # Track failed fixes
+        self.failed_fixes = defaultdict(int)
         
     def prepare_modification_prompt(self, 
                                   app_name: str,
@@ -286,8 +311,16 @@ Return JSON with ALL {len(files)} files:
                                   modification_request: str) -> Dict:
         """Create a minimal modification response when LLM fails"""
         
-        # Check if this is a UI/UX enhancement request
+        # Check if this is a dark theme request specifically
         modification_lower = modification_request.lower()
+        is_dark_theme_request = any(keyword in modification_lower for keyword in 
+                                  ['dark theme', 'dark mode', 'theme toggle', 'light/dark'])
+        
+        if is_dark_theme_request:
+            print(f"[MODIFICATION] Dark theme request detected, applying proper implementation")
+            return self._implement_dark_theme(original_files)
+        
+        # Check if this is a UI/UX enhancement request
         is_ui_request = any(keyword in modification_lower for keyword in 
                           ['ui', 'ux', 'fancy', 'interactive', 'design', 'visual', 
                            'color', 'animation', 'style', 'improve', 'better', 'modern'])
@@ -391,3 +424,373 @@ Return JSON with ALL {len(files)} files:
                 fixed_files.append(file)
         
         return fixed_files
+    
+    def _implement_dark_theme(self, original_files: List[Dict]) -> Dict:
+        """Implement proper dark theme with toggle"""
+        modified_files = []
+        app_file_modified = False
+        
+        for file in original_files:
+            path = file['path']
+            content = file['content']
+            modified = False
+            
+            # Find and modify the main App file
+            if path.endswith('App.swift') and '@main' in content:
+                # Add theme storage at the top
+                if '@AppStorage' not in content or 'isDarkMode' not in content:
+                    lines = content.split('\n')
+                    import_index = next((i for i, line in enumerate(lines) if 'import SwiftUI' in line), 0)
+                    
+                    # Insert after imports
+                    for i in range(import_index + 1, len(lines)):
+                        if 'struct' in lines[i] and 'App' in lines[i]:
+                            # Found the App struct, add theme storage
+                            indent = '    '
+                            lines.insert(i + 2, f'{indent}@AppStorage("isDarkMode") private var isDarkMode = false')
+                            break
+                    
+                    # Add preferredColorScheme modifier to WindowGroup
+                    for i, line in enumerate(lines):
+                        if 'WindowGroup' in line:
+                            # Find the closing brace of WindowGroup
+                            brace_count = 0
+                            for j in range(i, len(lines)):
+                                brace_count += lines[j].count('{') - lines[j].count('}')
+                                if brace_count == 0 and '}' in lines[j]:
+                                    lines.insert(j + 1, '        .preferredColorScheme(isDarkMode ? .dark : .light)')
+                                    break
+                            break
+                    
+                    content = '\n'.join(lines)
+                    modified = True
+                    app_file_modified = True
+            
+            # Add theme toggle to ContentView or main view
+            elif 'ContentView' in path or ('View' in path and 'List' in content):
+                if 'isDarkMode' not in content:
+                    # Add theme toggle to the view
+                    lines = content.split('\n')
+                    
+                    # Add AppStorage property
+                    for i, line in enumerate(lines):
+                        if 'struct' in line and 'View' in line:
+                            indent = '    '
+                            lines.insert(i + 2, f'{indent}@AppStorage("isDarkMode") private var isDarkMode = false')
+                            break
+                    
+                    # Add toggle to the view body
+                    added_toggle = False
+                    for i, line in enumerate(lines):
+                        if '.navigationTitle' in line or '.toolbar' in line:
+                            # Add before navigation modifiers
+                            indent = '        '
+                            lines.insert(i, f'{indent}.toolbar {{')
+                            lines.insert(i + 1, f'{indent}    ToolbarItem(placement: .navigationBarTrailing) {{')
+                            lines.insert(i + 2, f'{indent}        Toggle(isOn: $isDarkMode) {{')
+                            lines.insert(i + 3, f'{indent}            Image(systemName: isDarkMode ? "moon.fill" : "sun.max.fill")')
+                            lines.insert(i + 4, f'{indent}                .foregroundColor(isDarkMode ? .yellow : .orange)')
+                            lines.insert(i + 5, f'{indent}        }}')
+                            lines.insert(i + 6, f'{indent}        .toggleStyle(SwitchToggleStyle())')
+                            lines.insert(i + 7, f'{indent}    }}')
+                            lines.insert(i + 8, f'{indent}}}')
+                            added_toggle = True
+                            break
+                    
+                    # If no toolbar found, add it to the main view
+                    if not added_toggle:
+                        for i in range(len(lines) - 1, -1, -1):
+                            if '}' in lines[i] and lines[i].strip() == '}':
+                                # Found closing brace of body
+                                indent = '        '
+                                lines.insert(i, f'{indent}.safeAreaInset(edge: .top) {{')
+                                lines.insert(i + 1, f'{indent}    HStack {{')
+                                lines.insert(i + 2, f'{indent}        Spacer()')
+                                lines.insert(i + 3, f'{indent}        Toggle(isOn: $isDarkMode) {{')
+                                lines.insert(i + 4, f'{indent}            Label(isDarkMode ? "Dark" : "Light", systemImage: isDarkMode ? "moon.fill" : "sun.max.fill")')
+                                lines.insert(i + 5, f'{indent}        }}')
+                                lines.insert(i + 6, f'{indent}        .toggleStyle(SwitchToggleStyle())')
+                                lines.insert(i + 7, f'{indent}        .padding()')
+                                lines.insert(i + 8, f'{indent}    }}')
+                                lines.insert(i + 9, f'{indent}}}')
+                                break
+                    
+                    content = '\n'.join(lines)
+                    modified = True
+            
+            modified_files.append({
+                'path': path,
+                'content': content
+            })
+        
+        if app_file_modified:
+            return {
+                "files": modified_files,
+                "modification_summary": "Added dark theme toggle with system-wide support",
+                "changes_made": [
+                    "Added @AppStorage for theme preference persistence",
+                    "Added theme toggle switch in the navigation bar",
+                    "Applied preferredColorScheme modifier for system-wide theme",
+                    "Theme preference persists across app launches"
+                ],
+                "files_modified": [f['path'] for f in original_files if 'App.swift' in f['path'] or 'ContentView' in f['path']]
+            }
+        else:
+            # Fallback if we couldn't find the right files
+            return self._create_standard_response(original_files)
+    
+    def detect_and_handle_issue(self, issue_description: str, project_path: str = None) -> Dict[str, any]:
+        """Detect the type of issue and provide appropriate handling"""
+        issue_key = self._generate_issue_key(issue_description)
+        
+        # Track this issue
+        self.issue_tracker[issue_key].append({
+            "timestamp": datetime.now().isoformat(),
+            "description": issue_description
+        })
+        
+        # Check if this is a repeated issue
+        issue_count = len(self.issue_tracker[issue_key])
+        is_repeated = issue_count > 1
+        
+        response = {
+            "issue_detected": False,
+            "issue_type": None,
+            "is_repeated": is_repeated,
+            "attempt_number": issue_count,
+            "suggested_fixes": [],
+            "user_message": ""
+        }
+        
+        # Check for SSL errors
+        if ssl_handler:
+            ssl_analysis = ssl_handler.analyze_ssl_issue(issue_description, project_path or "")
+            if ssl_analysis["has_ssl_error"]:
+                response["issue_detected"] = True
+                response["issue_type"] = "ssl_error"
+                response["ssl_analysis"] = ssl_analysis
+                
+                # Get user-friendly explanation
+                response["user_message"] = ssl_handler.get_user_friendly_explanation(ssl_analysis)
+                
+                # If this is a repeated issue, suggest comprehensive fix
+                if is_repeated:
+                    response["suggested_fixes"] = [{
+                        "type": "comprehensive",
+                        "description": "Apply comprehensive SSL solution with multiple approaches",
+                        "priority": 1
+                    }]
+                    response["user_message"] += f"\n\nI see the previous fix didn't work. Let me apply a comprehensive SSL solution that handles multiple scenarios (attempt #{issue_count})."
+                else:
+                    response["suggested_fixes"] = ssl_analysis["recommended_fixes"]
+                
+                return response
+        
+        # Check for iOS-specific issues
+        if ios_fixes:
+            applicable_fixes = ios_fixes.find_fixes_for_issue(issue_description)
+            if applicable_fixes:
+                response["issue_detected"] = True
+                response["issue_type"] = "ios_specific"
+                response["ios_fixes"] = applicable_fixes
+                
+                # Generate instructions
+                if applicable_fixes:
+                    fix = applicable_fixes[0]  # Use the first applicable fix
+                    response["user_message"] = ios_fixes.generate_fix_instructions(fix)
+                    
+                    if is_repeated:
+                        response["user_message"] += f"\n\nI notice this is attempt #{issue_count} to fix this issue. Let me verify the previous fix was applied correctly."
+                
+                return response
+        
+        # Generic issue detection
+        if any(keyword in issue_description.lower() for keyword in ['error', 'fail', 'crash', 'not working', 'broken']):
+            response["issue_detected"] = True
+            response["issue_type"] = "generic_error"
+            response["user_message"] = "I detected an issue. Let me analyze it and provide a solution."
+            
+            if is_repeated:
+                response["user_message"] = f"I see this issue persists (attempt #{issue_count}). Let me try a more comprehensive fix."
+        
+        return response
+    
+    def _generate_issue_key(self, description: str) -> str:
+        """Generate a key for tracking similar issues"""
+        # Extract key terms
+        keywords = []
+        desc_lower = description.lower()
+        
+        # SSL-related keywords
+        if any(term in desc_lower for term in ['ssl', 'https', 'certificate', 'transport', 'ats']):
+            keywords.append('ssl')
+            
+        # iOS permission keywords
+        if any(term in desc_lower for term in ['permission', 'camera', 'photo', 'location']):
+            keywords.append('permission')
+            
+        # Error types
+        if 'crash' in desc_lower:
+            keywords.append('crash')
+        if 'build' in desc_lower:
+            keywords.append('build')
+            
+        return '_'.join(keywords) if keywords else 'general_issue'
+    
+    def _get_last_failed_fix(self, issue_key: str) -> Optional[str]:
+        """Get the type of fix that failed last time"""
+        if issue_key in self.failed_fixes:
+            # Return the last failed fix type
+            history = self.modification_history
+            for mod in reversed(history):
+                if mod.get('issue_key') == issue_key and not mod.get('success'):
+                    return mod.get('fix_type')
+        return None
+    
+    def track_modification_outcome(self, issue_key: str, fix_type: str, success: bool, details: Dict = None):
+        """Track the outcome of a modification attempt"""
+        outcome = {
+            "timestamp": datetime.now().isoformat(),
+            "issue_key": issue_key,
+            "fix_type": fix_type,
+            "success": success,
+            "details": details or {}
+        }
+        
+        self.modification_history.append(outcome)
+        
+        if not success:
+            self.failed_fixes[issue_key] += 1
+            
+        # Track in SSL handler if applicable
+        if ssl_handler and fix_type.startswith('ssl_'):
+            ssl_handler.track_fix_attempt(fix_type, success)
+    
+    def apply_ssl_fix(self, files: List[Dict], fix_type: str, **kwargs) -> Dict:
+        """Apply SSL-specific fixes to the project files"""
+        # Use robust SSL handler if available
+        if robust_ssl_handler and fix_type == "comprehensive":
+            domain = kwargs.get("domain", "localhost")
+            return robust_ssl_handler.apply_comprehensive_ssl_fix(files, domain)
+        
+        if not ssl_handler:
+            return {
+                "files": files,
+                "modification_summary": "SSL handler not available",
+                "changes_made": [],
+                "files_modified": []
+            }
+        
+        modified_files = list(files)
+        changes_made = []
+        files_modified = []
+        
+        # Generate fix code
+        fix_code = ssl_handler.generate_fix_code(fix_type, **kwargs)
+        
+        if fix_type == "add_ats_exception":
+            # Find or create Info.plist
+            info_plist_found = False
+            for i, file in enumerate(modified_files):
+                if 'Info.plist' in file['path']:
+                    info_plist_found = True
+                    content = file['content']
+                    
+                    # Add ATS configuration
+                    if 'NSAppTransportSecurity' not in content:
+                        # Insert before closing </dict>
+                        insert_pos = content.rfind('</dict>')
+                        if insert_pos > 0:
+                            new_content = (
+                                content[:insert_pos] + 
+                                fix_code['info_plist_modification'] + 
+                                '\n' + content[insert_pos:]
+                            )
+                            modified_files[i] = {
+                                'path': file['path'],
+                                'content': new_content
+                            }
+                            changes_made.append(fix_code['description'])
+                            files_modified.append(file['path'])
+                    break
+            
+            if not info_plist_found:
+                # Create Info.plist
+                info_plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+{fix_code['info_plist_modification']}
+</dict>
+</plist>"""
+                modified_files.append({
+                    'path': 'Info.plist',
+                    'content': info_plist_content
+                })
+                changes_made.append("Created Info.plist with ATS exception")
+                files_modified.append('Info.plist')
+                
+        elif fix_type == "upgrade_to_https":
+            # Apply HTTPS upgrade to all files
+            pattern_info = fix_code.get('code_pattern', {})
+            if pattern_info:
+                for i, file in enumerate(modified_files):
+                    if file['path'].endswith('.swift'):
+                        content = file['content']
+                        new_content = re.sub(
+                            pattern_info['search'],
+                            pattern_info['replace'],
+                            content,
+                            flags=re.IGNORECASE
+                        )
+                        if content != new_content:
+                            modified_files[i] = {
+                                'path': file['path'],
+                                'content': new_content
+                            }
+                            changes_made.append(f"{pattern_info['description']} in {file['path']}")
+                            files_modified.append(file['path'])
+                            
+        elif fix_type == "implement_cert_validation":
+            # Add certificate validation code
+            swift_code = fix_code.get('swift_code', '')
+            if swift_code:
+                # Find appropriate file to add the code
+                network_file_found = False
+                for i, file in enumerate(modified_files):
+                    if 'Network' in file['path'] or 'API' in file['path']:
+                        network_file_found = True
+                        content = file['content']
+                        # Add the code at the end of the file
+                        modified_files[i] = {
+                            'path': file['path'],
+                            'content': content + '\n\n' + swift_code
+                        }
+                        changes_made.append(fix_code['description'])
+                        files_modified.append(file['path'])
+                        break
+                
+                if not network_file_found:
+                    # Create a new network helper file
+                    modified_files.append({
+                        'path': 'Sources/Networking/SSLHelper.swift',
+                        'content': 'import Foundation\n\n' + swift_code
+                    })
+                    changes_made.append("Created SSL helper with certificate validation")
+                    files_modified.append('Sources/Networking/SSLHelper.swift')
+        
+        return {
+            "files": modified_files,
+            "modification_summary": f"Applied SSL fix: {fix_type}",
+            "changes_made": changes_made,
+            "files_modified": files_modified
+        }
+    
+    def _create_standard_response(self, files: List[Dict]) -> Dict:
+        """Create a standard response when no specific handler applies"""
+        return {
+            "files": files,
+            "modification_summary": "Unable to apply the requested modification",
+            "changes_made": ["No changes made - modification could not be processed"],
+            "files_modified": []
+        }

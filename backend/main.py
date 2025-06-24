@@ -24,6 +24,7 @@ from models import GenerateRequest, BuildStatus, ProjectStatus
 from self_healing_generator import SelfHealingGenerator
 from quality_assurance_pipeline import QualityAssurancePipeline
 from advanced_app_generator import AdvancedAppGenerator
+from chat_response_generator import ChatResponseGenerator
 
 # Get the absolute path to the frontend directory
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -58,6 +59,21 @@ try:
 except ImportError:
     print("Warning: modification_handler.py not found. Enhanced modification handling disabled.")
     modification_handler = None
+
+# Import SSL error handler and fix verification
+try:
+    from ssl_error_handler import SSLErrorHandler
+    ssl_handler = SSLErrorHandler()
+except ImportError:
+    print("Warning: SSLErrorHandler not available")
+    ssl_handler = None
+
+try:
+    from fix_verification_system import FixVerificationSystem
+    fix_verifier = FixVerificationSystem()
+except ImportError:
+    print("Warning: FixVerificationSystem not available")
+    fix_verifier = None
 
 try:
     from pre_generation_validator import PreGenerationValidator
@@ -105,6 +121,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Initialize services with new architecture
 enhanced_service = EnhancedClaudeService()
 project_manager = ProjectManager()
+chat_response_generator = ChatResponseGenerator()
 
 # Initialize build service with enhanced recovery
 build_service = BuildService()
@@ -502,6 +519,24 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
     """Async function to generate the app in background"""
     generation_start_time = datetime.now()
     
+    # CRITICAL: Wait longer for WebSocket to connect properly
+    await asyncio.sleep(1.0)
+    
+    # Send initial connection test
+    await notify_clients(project_id, {
+        "type": "status",
+        "message": "✅ Connected to generation service",
+        "status": "connected"
+    })
+    
+    # Send another update to ensure UI is responding
+    await asyncio.sleep(0.1)
+    await notify_clients(project_id, {
+        "type": "status",
+        "message": "🔍 Preparing to generate your app...",
+        "status": "preparing"
+    })
+    
     try:
         # Extract app name using LLM first, fallback to regex
         if request.app_name and request.app_name != "MyApp":
@@ -612,8 +647,18 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
                 "complexity": "low"
             })
 
+        # Define the progress callback function for all generators
+        async def generation_progress(message: str):
+            await notify_clients(project_id, {
+                "type": "status",
+                "message": message,
+                "status": "generating"
+            })
+
         # Use advanced generator for complex apps
-        if is_complex_app:
+        generated_code = None
+        
+        if is_complex_app and advanced_generator:
             # Send progress before generation
             await notify_clients(project_id, {
                 "type": "status",
@@ -621,14 +666,6 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
                 "status": "generating",
                 "progress": "Initializing advanced architecture patterns"
             })
-            
-            # Add a callback for progress updates during generation
-            async def generation_progress(message: str):
-                await notify_clients(project_id, {
-                    "type": "status",
-                    "message": message,
-                    "status": "generating"
-                })
             
             # Pass the callback if the generator supports it
             if hasattr(advanced_generator, 'set_progress_callback'):
@@ -652,11 +689,19 @@ async def _generate_app_async(project_id: str, request: GenerateRequest):
             })
             
         elif hasattr(enhanced_service, 'generate_ios_app_multi_llm'):
+            # Set progress callback for enhanced service
+            if hasattr(enhanced_service, 'set_progress_callback'):
+                enhanced_service.set_progress_callback(generation_progress)
+            
             generated_code = await enhanced_service.generate_ios_app_multi_llm(
                 description=validated_description,
                 app_name=app_name
             )
         elif hasattr(enhanced_service, 'generate_ios_app'):
+            # Set progress callback for enhanced service
+            if hasattr(enhanced_service, 'set_progress_callback'):
+                enhanced_service.set_progress_callback(generation_progress)
+            
             generated_code = await enhanced_service.generate_ios_app(
                 description=validated_description,
                 app_name=app_name
@@ -843,9 +888,10 @@ Important: Return ONLY valid JSON, no explanatory text."""
         with open(project_metadata_path, 'w') as f:
             json.dump(project_metadata, f, indent=2)
 
-        # Store initial state
+        # Store initial state - DON'T store files to prevent memory issues
         project_state[project_id] = {
-            "current_files": generated_code.get("files", []).copy(),
+            "file_count": len(generated_code.get("files", [])),
+            "created_at": datetime.now().isoformat(),
             "version": 1
         }
 
@@ -1020,6 +1066,90 @@ async def modify_app(request: ModifyRequest):
         project_path = await project_manager.get_project_path(project_id)
         if not project_path:
             raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Check if this is an issue report (SSL, crash, etc.)
+        if modification_handler:
+            issue_detection = modification_handler.detect_and_handle_issue(
+                request.modification, 
+                project_path
+            )
+            
+            if issue_detection["issue_detected"]:
+                # Send user-friendly explanation
+                await notify_clients(project_id, {
+                    "type": "status",
+                    "message": issue_detection["user_message"],
+                    "status": "analyzing_issue",
+                    "issue_type": issue_detection["issue_type"],
+                    "is_repeated": issue_detection["is_repeated"],
+                    "attempt_number": issue_detection["attempt_number"]
+                })
+                
+                # Handle SSL errors specifically
+                if issue_detection["issue_type"] == "ssl_error":
+                    ssl_analysis = issue_detection.get("ssl_analysis", {})
+                    fixes = issue_detection.get("suggested_fixes", [])
+                    
+                    if fixes:
+                        # Apply the first suggested fix
+                        fix = fixes[0]
+                        fix_type = fix.get("type", "add_ats_exception")
+                        
+                        await notify_clients(project_id, {
+                            "type": "status",
+                            "message": f"🔧 Applying fix: {fix.get('description', 'SSL configuration')}...",
+                            "status": "applying_fix"
+                        })
+                        
+                        # Read current files
+                        files_to_modify = await project_manager.read_project_files(project_id)
+                        
+                        # Apply SSL fix - use comprehensive fix for better results
+                        domain = ssl_analysis.get("domain", "localhost")
+                        
+                        # If it's a repeated SSL issue, use comprehensive fix
+                        if issue_detection.get("is_repeated", False):
+                            fix_type = "comprehensive"
+                            await notify_clients(project_id, {
+                                "type": "status", 
+                                "message": "🔒 Applying comprehensive SSL solution...",
+                                "status": "applying_comprehensive_fix"
+                            })
+                        
+                        modified_result = modification_handler.apply_ssl_fix(
+                            files_to_modify,
+                            fix_type,
+                            domain=domain
+                        )
+                        
+                        # Track the outcome
+                        issue_key = modification_handler._generate_issue_key(request.modification)
+                        modification_handler.track_modification_outcome(
+                            issue_key,
+                            fix_type,
+                            success=len(modified_result["files_modified"]) > 0,
+                            details={"domain": domain}
+                        )
+                        
+                        # Update project files
+                        await project_manager.update_project_files(
+                            project_id,
+                            modified_result["files"]
+                        )
+                        
+                        # Continue with normal modification flow to rebuild
+                        modified_code = modified_result
+                        
+                        # Skip the normal LLM modification since we handled it
+                        goto_build = True
+                    else:
+                        goto_build = False
+                else:
+                    goto_build = False
+            else:
+                goto_build = False
+        else:
+            goto_build = False
 
         # Get project context
         context = project_contexts.get(project_id, {})
@@ -1035,55 +1165,97 @@ async def modify_app(request: ModifyRequest):
 
         bundle_id = project_metadata.get('bundle_id')
         app_name = project_metadata.get('app_name', context.get("app_name", "MyApp"))
-
-        # Use current state files
-        files_to_modify = current_state.get("current_files", context.get("generated_files", []))
-
-        # Send immediate status updates like generation flow
-        await notify_clients(project_id, {
-            "type": "status",
-            "message": f"🚀 Starting to modify {app_name}...",
-            "status": "initializing",
-            "app_name": app_name
-        })
         
-        await notify_clients(project_id, {
-            "type": "status",
-            "message": "🔍 AI is analyzing your modification request...",
-            "status": "analyzing",
-            "app_name": app_name
-        })
-
-        # Send status before generation
-        await notify_clients(project_id, {
-            "type": "status",
-            "message": "🎨 Generating code modifications...",
-            "status": "generating",
-            "app_name": app_name
-        })
+        # If we already handled an SSL fix, skip to build
+        if 'goto_build' in locals() and goto_build and 'modified_code' in locals():
+            # Skip the LLM generation part
+            pass
+        else:
+            # CRITICAL FIX: Always read fresh files from disk to prevent stale state
+            print(f"[MAIN] Reading fresh files from disk for modification #{len(context.get('modifications', [])) + 1}")
+            files_to_modify = await project_manager.read_project_files(project_id)
         
-        # Generate modified code with INTELLIGENCE
-        try:
-            # Check if the method exists, otherwise fall back
-            if hasattr(enhanced_service, 'modify_ios_app_multi_llm'):
-                modified_code = await enhanced_service.modify_ios_app_multi_llm(
-                    app_name,
-                    context.get("description", ""),
-                    request.modification,
-                    files_to_modify,
-                    existing_bundle_id=bundle_id,
-                    project_tracking_id=context.get("project_tracking_id", None)
-                )
-            elif hasattr(enhanced_service, 'modify_ios_app'):
-                modified_code = await enhanced_service.modify_ios_app(
-                    app_name,
-                    context.get("description", ""),
-                    request.modification,
-                    files_to_modify
-                )
+            # Fallback to memory state only if disk read fails
+            if not files_to_modify:
+                print("[MAIN] WARNING: No files found on disk, falling back to memory state")
+                files_to_modify = current_state.get("current_files", context.get("generated_files", []))
+
+            # Check for SSL errors or repeated issues
+            issue_detected = None
+            if ssl_handler:
+                has_ssl_error, ssl_patterns = ssl_handler.detect_ssl_error(request.modification)
+                if has_ssl_error:
+                    issue_detected = "ssl_error"
+                    print(f"[MAIN] SSL error detected in user request: {ssl_patterns}")
+            
+            # Check if this is a repeated issue
+            if fix_verifier and project_id:
+                repeated_issues = fix_verifier.get_repeated_issues(project_id)
+                for issue in repeated_issues:
+                    if issue["attempts"] >= 2 and not issue["any_working"]:
+                        # User is reporting the same issue multiple times
+                        alternative = fix_verifier.suggest_alternative_approach(project_id, issue["issue_type"])
+                        if alternative:
+                            await notify_clients(project_id, {
+                                "type": "status",
+                                "message": f"🤔 I notice this issue persists. {alternative}",
+                                "status": "analyzing",
+                                "app_name": app_name
+                            })
+            
+            # Send immediate status updates like generation flow
+            if issue_detected == "ssl_error":
+                await notify_clients(project_id, {
+                    "type": "status",
+                    "message": f"🔒 I see you're having SSL/security issues with {app_name}. Let me fix that properly...",
+                    "status": "initializing",
+                    "app_name": app_name
+                })
             else:
-                # Fall back to using generate_text with modification prompt
-                prompt = f"""Modify the existing iOS app with these details:
+                await notify_clients(project_id, {
+                    "type": "status",
+                    "message": f"🚀 Starting to modify {app_name}...",
+                    "status": "initializing",
+                    "app_name": app_name
+                })
+            
+            await notify_clients(project_id, {
+                "type": "status",
+                "message": "🔍 AI is analyzing your modification request...",
+                "status": "analyzing",
+                "app_name": app_name
+            })
+
+            # Send status before generation
+            await notify_clients(project_id, {
+                "type": "status",
+                "message": "🎨 Generating code modifications...",
+                "status": "generating",
+                "app_name": app_name
+            })
+            
+            # Generate modified code with INTELLIGENCE
+            try:
+                # Check if the method exists, otherwise fall back
+                if hasattr(enhanced_service, 'modify_ios_app_multi_llm'):
+                    modified_code = await enhanced_service.modify_ios_app_multi_llm(
+                        app_name,
+                        context.get("description", ""),
+                        request.modification,
+                        files_to_modify,
+                        existing_bundle_id=bundle_id,
+                        project_tracking_id=context.get("project_tracking_id", None)
+                    )
+                elif hasattr(enhanced_service, 'modify_ios_app'):
+                    modified_code = await enhanced_service.modify_ios_app(
+                        app_name,
+                        context.get("description", ""),
+                        request.modification,
+                        files_to_modify
+                    )
+                else:
+                    # Fall back to using generate_text with modification prompt
+                    prompt = f"""Modify the existing iOS app with these details:
 App Name: {app_name}
 Current Description: {context.get("description", "")}
 Modification Request: {request.modification}
@@ -1094,56 +1266,56 @@ Current files to modify:
 
 Return a JSON response with the modified files and changes made."""
 
-                result = enhanced_service.generate_text(prompt)
-                if result["success"]:
-                    modified_code = json.loads(result["text"])  # Using json module correctly
-                else:
-                    raise Exception(f"Modification failed: {result.get('error', 'Unknown error')}")
-        
-        except json.JSONDecodeError as e:
-            print(f"[ERROR] JSON parsing error in modification: {e}")
-            await notify_clients(project_id, {
-                "type": "error",
-                "message": "❌ Failed to parse modification response",
-                "status": "error"
-            })
-            return JSONResponse(
-                status_code=500,
-                content={"error": f"Failed to parse modification response: {str(e)}"}
-            )
-        except Exception as e:
-            print(f"[ERROR] Modification error: {e}")
-            await notify_clients(project_id, {
-                "type": "error", 
-                "message": f"❌ Modification failed: {str(e)}",
-                "status": "error"
-            })
-            return JSONResponse(
-                status_code=500,
-                content={"error": f"Modification failed: {str(e)}"}
-            )
+                    result = enhanced_service.generate_text(prompt)
+                    if result["success"]:
+                        modified_code = json.loads(result["text"])  # Using json module correctly
+                    else:
+                        raise Exception(f"Modification failed: {result.get('error', 'Unknown error')}")
+            
+            except json.JSONDecodeError as e:
+                print(f"[ERROR] JSON parsing error in modification: {e}")
+                await notify_clients(project_id, {
+                    "type": "error",
+                    "message": "❌ Failed to parse modification response",
+                    "status": "error"
+                })
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"Failed to parse modification response: {str(e)}"}
+                )
+            except Exception as e:
+                print(f"[ERROR] Modification error: {e}")
+                await notify_clients(project_id, {
+                    "type": "error", 
+                    "message": f"❌ Modification failed: {str(e)}",
+                    "status": "error"
+                })
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"Modification failed: {str(e)}"}
+                )
 
-        # Check if parsing actually succeeded
-        parsing_failed = (
-            not modified_code.get("files") or 
-            len(modified_code.get("files", [])) == 0 or
-            any("Error:" in str(change) for change in modified_code.get("changes_made", []))
-        )
-
-        if parsing_failed:
-            print("[ERROR] Parsing failed - no files or error in changes")
-            await notify_clients(project_id, {
-                "type": "error",
-                "message": "❌ Failed to parse modification response. Please try rephrasing your request.",
-                "status": "error"
-            })
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Failed to parse modification response. The AI couldn't understand the request format."}
+            # Check if parsing actually succeeded
+            parsing_failed = (
+                not modified_code.get("files") or 
+                len(modified_code.get("files", [])) == 0 or
+                any("Error:" in str(change) for change in modified_code.get("changes_made", []))
             )
 
-        # Track which LLM was used for modification
-        llm_used = modified_code.get("modified_by_llm", "unknown")
+            if parsing_failed:
+                print("[ERROR] Parsing failed - no files or error in changes")
+                await notify_clients(project_id, {
+                    "type": "error",
+                    "message": "❌ Failed to parse modification response. Please try rephrasing your request.",
+                    "status": "error"
+                })
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "Failed to parse modification response. The AI couldn't understand the request format."}
+                )
+
+            # Track which LLM was used for modification
+            llm_used = modified_code.get("modified_by_llm", "unknown")
         
         # Verify modifications were actually applied
         if modification_verifier:
@@ -1158,48 +1330,144 @@ Return a JSON response with the modified files and changes made."""
             if not verification_success:
                 print(f"[MAIN] Modification verification failed: {verification_issues}")
                 
-                # Try to recover by asking LLM again with specific instructions
+                # Analyze the failure pattern to create better retry prompts
+                no_changes = any("No files were modified" in issue for issue in verification_issues)
+                incomplete = any("Incomplete implementation" in issue for issue in verification_issues)
+                
+                # Progressive retry strategy
+                retry_attempts = 0
+                max_retries = 2
+                
+                while not verification_success and retry_attempts < max_retries:
+                    retry_attempts += 1
+                    
+                    # Create progressively more specific prompts
+                    if retry_attempts == 1:
+                        if no_changes:
+                            retry_prompt = f"""The AI failed to make any changes. The user specifically requested: "{request.modification}"
+                            
+CRITICAL INSTRUCTIONS:
+1. You MUST modify the relevant files to implement: {request.modification}
+2. If adding dark theme, add a toggle switch, not just dark colors
+3. If fixing a bug, actually change the code that's broken
+4. Return ALL {len(files_to_modify)} files, with actual changes to implement the request"""
+                        else:
+                            retry_prompt = f"""Previous attempt was incomplete. {', '.join(verification_issues)}
+                            
+User's original request: {request.modification}
+You must FULLY implement this request in the relevant files."""
+                    else:
+                        # Final attempt - be extremely specific
+                        retry_prompt = f"""FINAL ATTEMPT: The previous {retry_attempts} attempts failed.
+                        
+USER REQUEST: {request.modification}
+
+STEP BY STEP:
+1. Identify which files need changes for: {request.modification}
+2. Make the ACTUAL code changes needed
+3. Return ALL {len(files_to_modify)} files
+
+Example: If user asks for "dark theme", you must:
+- Add @AppStorage("isDarkMode") var isDarkMode = false
+- Add a Toggle button for theme switching  
+- Add .preferredColorScheme modifier
+DO NOT just make colors dark!"""
+                    
+                    await notify_clients(project_id, {
+                        "type": "status",
+                        "message": f"🔄 Refining implementation (attempt {retry_attempts + 1}/{max_retries + 1})...",
+                        "status": "retrying"
+                    })
+                    
+                    # Retry with better prompt
+                    try:
+                        if hasattr(enhanced_service, 'modify_ios_app'):
+                            modified_code = await enhanced_service.modify_ios_app(
+                                app_name,
+                                context.get("description", ""),
+                                retry_prompt,
+                                files_to_modify,
+                                existing_bundle_id=bundle_id
+                            )
+                            
+                            # Verify again
+                            verification_success, verification_issues = modification_verifier.verify_modifications(
+                                files_to_modify,
+                                modified_code.get("files", []),
+                                request.modification,
+                                verbose=True
+                            )
+                            
+                            if verification_success:
+                                print(f"[MAIN] Retry {retry_attempts} succeeded!")
+                                break
+                                
+                    except Exception as e:
+                        print(f"[MAIN] Retry {retry_attempts} failed: {e}")
+                
+                # After all retries, check if we succeeded
+                if not verification_success:
+                    # Now we can give up - but with helpful feedback
+                    await notify_clients(project_id, {
+                        "type": "error",
+                        "message": f"❌ Unable to apply modifications after {max_retries + 1} attempts. The AI couldn't properly implement: '{request.modification}'. Try breaking it into smaller, specific changes.",
+                        "status": "error"
+                    })
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": f"Modification failed after {max_retries + 1} attempts",
+                            "issues": verification_issues,
+                            "suggestion": "Try more specific requests like 'Add a toggle button for dark mode in the settings view'"
+                        }
+                    )
+                
+                # Old recovery code removed - using progressive retry above
+        
+        # Apply SSL fixes if detected
+        if issue_detected == "ssl_error" and ssl_handler:
+            try:
+                print("[MAIN] Applying SSL fixes to the modified code")
+                # Analyze the SSL issue properly
+                ssl_analysis = ssl_handler.analyze_ssl_issue(request.modification, project_path)
+                
+                # Get recommended fixes
+                recommended_fixes = ssl_analysis.get("recommended_fixes", [])
+                if recommended_fixes:
+                    fix_type = recommended_fixes[0].get("type", "add_ats_exception")
+                    domain = ssl_analysis.get("domain", "localhost")
+                    
+                    print(f"[MAIN] Applying SSL fix type: {fix_type} for domain: {domain}")
+                    
+                    # Apply the fix using modification handler
+                    modified_result = modification_handler.apply_ssl_fix(
+                        modified_code.get("files", []),
+                        fix_type,
+                        domain=domain
+                    )
+                    
+                    # Update the modified code with the SSL fixes
+                    modified_code["files"] = modified_result["files"]
+                    
+                    # Track the fix attempt
+                    if fix_verifier:
+                        fix_verifier.track_fix_attempt(
+                            project_id,
+                            "ssl_error",
+                            {"type": fix_type, "domain": domain},
+                            modified_result.get("files_modified", [])
+                        )
+                    
+                    print(f"[MAIN] SSL fix applied: {len(modified_result.get('files_modified', []))} files modified")
+            except Exception as e:
+                logger.error(f"[MAIN] Error applying SSL fix: {str(e)}")
+                # Continue without SSL fix - don't crash the whole modification
                 await notify_clients(project_id, {
                     "type": "status",
-                    "message": "🔄 Ensuring all files are properly modified...",
-                    "status": "retrying"
+                    "message": "⚠️ SSL fix encountered an issue, continuing with modification...",
+                    "status": "warning"
                 })
-                
-                # Create recovery prompt
-                recovery_prompt = f"""The previous modification was incomplete. 
-                Issues found: {', '.join(verification_issues)}
-                
-                CRITICAL: You must return ALL {len(files_to_modify)} files, even if some remain unchanged.
-                Original modification request: {request.modification}
-                
-                Return the complete set of files with the requested modifications applied."""
-                
-                # Retry the modification
-                try:
-                    if hasattr(enhanced_service, 'modify_ios_app'):
-                        modified_code = await enhanced_service.modify_ios_app(
-                            app_name,
-                            context.get("description", ""),
-                            recovery_prompt,
-                            files_to_modify,
-                            existing_bundle_id=bundle_id
-                        )
-                        
-                        # Verify again
-                        verification_success, verification_issues = modification_verifier.verify_modifications(
-                            files_to_modify,
-                            modified_code.get("files", []),
-                            request.modification,
-                            verbose=True
-                        )
-                        
-                        if not verification_success:
-                            print(f"[MAIN] Recovery attempt still failed: {verification_issues}")
-                            # Continue anyway - partial success is better than failure
-                    
-                except Exception as e:
-                    print(f"[MAIN] Modification recovery failed: {e}")
-                    # Continue with original response
+            
         
         # Generate modification report
         if modification_verifier:
@@ -1208,6 +1476,12 @@ Return a JSON response with the modified files and changes made."""
                 modified_code.get("files", [])
             )
             print(f"[MAIN] Modification report: {modification_report}")
+            
+        # Log context size for debugging
+        context_size = len(json.dumps(context))
+        print(f"[MAIN] Context size after modification: {context_size} bytes")
+        print(f"[MAIN] Number of files in memory: {len(files_to_modify)}")
+        print(f"[MAIN] Number of files returned by LLM: {len(modified_code.get('files', []))}")
 
         # Validate modifications
         await notify_clients(project_id, {
@@ -1274,9 +1548,13 @@ Return a JSON response with the modified files and changes made."""
             fixed_files = modification_handler.validate_and_fix_swift_syntax(modified_code.get("files", []))
             modified_code["files"] = fixed_files
         
-        # Update project state
-        project_state[project_id]["current_files"] = modified_code.get("files", []).copy()
+        # Update project state - DON'T store full file contents to prevent memory bloat
+        project_state[project_id]["file_count"] = len(modified_code.get("files", []))
+        project_state[project_id]["last_modified"] = datetime.now().isoformat()
         project_state[project_id]["version"] += 1
+        # Remove the problematic current_files that causes stale state
+        if "current_files" in project_state[project_id]:
+            del project_state[project_id]["current_files"]
 
         # Update context
         if "modifications" not in context:
@@ -1294,8 +1572,23 @@ Return a JSON response with the modified files and changes made."""
         # CRITICAL: Limit modification history to prevent context growth
         if len(context["modifications"]) > 3:
             context["modifications"] = context["modifications"][-3:]
-
-        project_contexts[project_id] = context
+            
+        # ADDITIONAL FIX: Clean up context to prevent accumulation
+        # Remove large fields that shouldn't persist between modifications
+        cleaned_context = {
+            "app_name": context.get("app_name"),
+            "description": context.get("description"),
+            "features": context.get("features"),
+            "ui_framework": context.get("ui_framework"),
+            "app_complexity": context.get("app_complexity"),
+            "project_tracking_id": context.get("project_tracking_id"),
+            "modifications": context.get("modifications", [])
+        }
+        
+        # Log cleaned context size
+        print(f"[MAIN] Cleaned context size: {len(json.dumps(cleaned_context))} bytes")
+        
+        project_contexts[project_id] = cleaned_context
 
         # Update files
         await notify_clients(project_id, {
@@ -1340,7 +1633,7 @@ Return a JSON response with the modified files and changes made."""
             
         print(f"[MAIN] Building modification with complexity: {app_complexity}")
         
-        build_result = await build_service.build_project(project_path, project_id, bundle_id, app_complexity)
+        build_result = await build_service.build_project(project_path, project_id, bundle_id, app_complexity, is_modification=True)
 
         if build_result.success:
             modification_summary = modified_code.get("modification_summary", "Changes applied")
@@ -1424,6 +1717,14 @@ Return a JSON response with the modified files and changes made."""
     except Exception as e:
         import traceback
         traceback.print_exc()
+        
+        # Notify UI about the error
+        await notify_clients(project_id, {
+            "type": "error",
+            "message": f"❌ Modification failed: {str(e)}",
+            "status": "failed",
+            "error": str(e)
+        })
         
         # Return error response instead of throwing exception
         return {
@@ -1511,7 +1812,9 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
             else:
                 action = "update"
             
-            immediate_response = f"Perfect! I'll {action} {app_name} right away. You'll see the progress below..."
+            immediate_response = chat_response_generator.generate_modification_response(
+                request.message, app_name, request.context
+            )
             
             # Start modification in background
             background_tasks.add_task(
@@ -1540,20 +1843,10 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
             except:
                 app_name = extract_app_name_from_description(request.message)
             
-            # Generate contextual response based on app type
-            desc_lower = request.message.lower()
-            if 'game' in desc_lower:
-                excitement = "🎮 Awesome! A game app!"
-            elif 'social' in desc_lower:
-                excitement = "🌐 Great choice! Social apps are popular!"
-            elif 'fitness' in desc_lower or 'health' in desc_lower:
-                excitement = "💪 Perfect! Health apps help people stay fit!"
-            elif 'food' in desc_lower or 'delivery' in desc_lower:
-                excitement = "🍕 Yum! Food apps are always in demand!"
-            else:
-                excitement = "✨ Excellent idea!"
-                
-            immediate_response = f"{excitement} I'll create {app_name} for you right now. Watch the progress below..."
+            # Generate contextual response
+            immediate_response = chat_response_generator.generate_creation_response(
+                request.message, app_name
+            )
             
             # Create a GenerateRequest and delegate to generate_app
             generate_request = GenerateRequest(
@@ -1743,25 +2036,105 @@ async def handle_chat_message(websocket: WebSocket, project_id: str, message: st
                 # Even if no keywords detected, treat as modification
                 modification_type = "app update"
             
+            # Check for SSL errors FIRST
+            ssl_error_detected = False
+            if ssl_handler:
+                has_ssl_error, ssl_patterns = ssl_handler.detect_ssl_error(message)
+                if has_ssl_error:
+                    ssl_error_detected = True
+                    response_msg = (f"I understand you're experiencing SSL/security issues with {app_name}. "
+                                  f"This is a common iOS issue. I'll fix it by adding the proper security "
+                                  f"configurations to allow secure connections. Let me handle that for you.")
+            
+            # Create contextual response based on request
+            request_lower = message.lower()
+            if not ssl_error_detected:
+                if "dark theme" in request_lower or "dark mode" in request_lower:
+                    response_msg = f"I'll add a dark theme toggle to {app_name}. The app will support both light and dark modes."
+                elif "fix" in request_lower or "bug" in request_lower:
+                    # Extract what's being fixed if possible
+                    if "crash" in request_lower:
+                        response_msg = f"I'll fix the crash issue in {app_name}."
+                    elif "error" in request_lower:
+                        response_msg = f"I'll fix the error in {app_name}."
+                    else:
+                        response_msg = f"I'll fix that issue in {app_name}."
+            elif "add" in request_lower:
+                if "button" in request_lower:
+                    response_msg = f"I'll add the button to {app_name}."
+                elif "feature" in request_lower:
+                    response_msg = f"I'll add that feature to {app_name}."
+                elif "screen" in request_lower or "view" in request_lower:
+                    response_msg = f"I'll add the new screen to {app_name}."
+                elif "animation" in request_lower:
+                    response_msg = f"I'll add animations to {app_name}."
+                else:
+                    response_msg = f"I'll add that to {app_name}."
+            elif "change" in request_lower or "update" in request_lower:
+                if "color" in request_lower:
+                    response_msg = f"I'll update the colors in {app_name}."
+                elif "layout" in request_lower:
+                    response_msg = f"I'll update the layout in {app_name}."
+                elif "text" in request_lower or "label" in request_lower:
+                    response_msg = f"I'll update the text in {app_name}."
+                else:
+                    response_msg = f"I'll make those changes to {app_name}."
+            elif "remove" in request_lower or "delete" in request_lower:
+                response_msg = f"I'll remove that from {app_name}."
+            elif "improve" in request_lower or "enhance" in request_lower:
+                response_msg = f"I'll enhance {app_name} with those improvements."
+            elif "make" in request_lower and "bigger" in request_lower:
+                response_msg = f"I'll increase the size in {app_name}."
+            elif "make" in request_lower and "smaller" in request_lower:
+                response_msg = f"I'll reduce the size in {app_name}."
+            else:
+                # More specific fallback based on detected elements
+                if mentioned_elements:
+                    response_msg = f"I'll update the {mentioned_elements[0]} in {app_name}."
+                else:
+                    response_msg = f"I'll apply that {modification_type} to {app_name}."
+            
             await websocket.send_json({
                 "type": "chat_response",
-                "message": f"I understand you want to modify {app_name}. Processing your {modification_type} request...",
+                "message": response_msg,
                 "action": "modify",
                 "project_id": project_id
             })
             
-            # Send modification request
-            modify_request = {
-                "project_id": project_id,
-                "modification": message,
-                "context": context
-            }
-            
-            # Instead of calling the API directly, send a message to trigger frontend action
-            await websocket.send_json({
-                "type": "trigger_modification",
-                "data": modify_request
-            })
+            # IMPORTANT: Process modification server-side to ensure WebSocket updates
+            import httpx
+            try:
+                # Add the WebSocket to a special tracking dict so modify endpoint knows to send updates
+                if project_id not in active_connections:
+                    active_connections[project_id] = []
+                if websocket not in active_connections[project_id]:
+                    active_connections[project_id].append(websocket)
+                
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.post(
+                        "http://localhost:8002/api/modify",
+                        json={
+                            "project_id": project_id,
+                            "modification": message,
+                            "context": context
+                        }
+                    )
+                    
+                    # The modify endpoint will send WebSocket updates during processing
+                    # We just need to handle the final result
+                    if response.status_code != 200:
+                        error_data = response.json()
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": error_data.get("error", "Modification failed")
+                        })
+                        
+            except Exception as e:
+                print(f"[WS] Error processing modification: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Failed to process modification: {str(e)}"
+                })
             
         elif is_creation and (not project_id or project_id == "new"):
             # New app creation

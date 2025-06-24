@@ -786,6 +786,12 @@
                             const progressText = document.getElementById('progressText');
                             if (progressText) {
                                 progressText.textContent = 'Connecting to generation service...';
+                                console.log('[UI] Set initial progress text to:', progressText.textContent);
+                                
+                                // Force DOM update
+                                progressText.style.display = 'none';
+                                progressText.offsetHeight; // Trigger reflow
+                                progressText.style.display = '';
                             }
                             
                             // Update UI state
@@ -1137,7 +1143,7 @@
                 progressText.textContent = message;
                 console.log('[UI] progressText after update:', progressText.textContent);
                 
-                // Force a repaint to ensure the update is visible
+                // Force DOM update to ensure visibility
                 progressText.style.display = 'none';
                 progressText.offsetHeight; // Trigger reflow
                 progressText.style.display = '';

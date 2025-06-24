@@ -85,19 +85,25 @@ class IntelligentLLMRouter:
         logger.info(f"Modification history present: {modification_history is not None}")
         
         # Check if this is app creation (not modification)
-        creation_keywords = ['create', 'build', 'make', 'develop', 'design a', 'design an']
-        is_creation = any(keyword in desc_lower for keyword in creation_keywords)
-        logger.info(f"Is creation request: {is_creation}")
-        
-        # For app creation, return ARCHITECTURE immediately
-        # But only if it's actually creating an app, not just a component
-        app_keywords = ['app', 'application', 'ios app', 'swift app']
-        is_app_creation = is_creation and any(keyword in desc_lower for keyword in app_keywords)
-        logger.info(f"Is app creation: {is_app_creation}")
-        
-        if is_app_creation and not modification_history:
-            logger.info("Returning ARCHITECTURE for app creation")
-            return RequestType.ARCHITECTURE
+        # CRITICAL: If modification_history exists, this is NEVER app creation
+        if modification_history:
+            logger.info("Has modification history - NOT app creation")
+            is_creation = False
+            is_app_creation = False
+        else:
+            creation_keywords = ['create', 'build', 'make', 'develop', 'design a', 'design an']
+            is_creation = any(keyword in desc_lower for keyword in creation_keywords)
+            logger.info(f"Is creation request: {is_creation}")
+            
+            # For app creation, return ARCHITECTURE immediately
+            # But only if it's actually creating an app, not just a component
+            app_keywords = ['app', 'application', 'ios app', 'swift app']
+            is_app_creation = is_creation and any(keyword in desc_lower for keyword in app_keywords)
+            logger.info(f"Is app creation: {is_app_creation}")
+            
+            if is_app_creation:
+                logger.info("Returning ARCHITECTURE for app creation")
+                return RequestType.ARCHITECTURE
         
         # Count keyword matches - use word boundaries to avoid partial matches
         ui_score = sum(1 for keyword in self.ui_keywords if re.search(r'\b' + re.escape(keyword) + r'\b', desc_lower))
@@ -136,9 +142,14 @@ class IntelligentLLMRouter:
         logger.info(f"Returning SIMPLE_MODIFICATION (ui_score={ui_score}, algo_score={algo_score}, data_score={data_score})")
         return RequestType.SIMPLE_MODIFICATION
     
-    def route_initial_request(self, description: str, app_type: str = None, available_providers: List[str] = None) -> str:
+    def route_initial_request(self, description: str, app_type: str = None, available_providers: List[str] = None, is_modification: bool = False) -> str:
         """Route initial request to most appropriate LLM"""
-        request_type = self.analyze_request(description)
+        # If this is explicitly a modification, pass modification_history to analyze_request
+        if is_modification:
+            # Pass a dummy modification history to indicate this is a modification context
+            request_type = self.analyze_request(description, modification_history=[{"dummy": True}])
+        else:
+            request_type = self.analyze_request(description)
         
         logger.info(f"Request analyzed as: {request_type.value}")
         
