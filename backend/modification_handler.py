@@ -666,11 +666,70 @@ Return JSON with ALL {len(files)} files:
         if ssl_handler and fix_type.startswith('ssl_'):
             ssl_handler.track_fix_attempt(fix_type, success)
     
+    def detect_issue_type(self, modification_request: str, context: Optional[Dict] = None) -> Tuple[Optional[str], Optional[Dict]]:
+        """Detect the type of issue from the modification request"""
+        request_lower = modification_request.lower()
+        
+        # SSL/Network related issues
+        ssl_patterns = [
+            'ssl error',
+            'ssl certificate',
+            'transport security',
+            'cleartext http',
+            'secure connection',
+            'certificate',
+            'tls error',
+            'https error',
+            'failed to load',
+            'failed to fetch',
+            'network error',
+            'cannot connect'
+        ]
+        
+        if any(pattern in request_lower for pattern in ssl_patterns):
+            # Extract domain if mentioned
+            domain_match = re.search(r'(?:https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', modification_request)
+            domain = domain_match.group(1) if domain_match else None
+            
+            return "ssl_error", {
+                "domain": domain,
+                "error_type": "ssl_certificate" if "certificate" in request_lower else "transport_security"
+            }
+        
+        # Dark theme requests
+        dark_theme_patterns = ['dark mode', 'dark theme', 'night mode', 'dark toggle']
+        if any(pattern in request_lower for pattern in dark_theme_patterns):
+            return "dark_theme", {}
+        
+        # Bug fixes
+        bug_patterns = ['bug', 'fix', 'error', 'crash', 'issue', 'problem']
+        if any(pattern in request_lower for pattern in bug_patterns):
+            # Check for specific known bugs
+            if 'count' in request_lower and ('0' in request_lower or 'zero' in request_lower):
+                return "count_bug", {}
+            return "bug_fix", {}
+        
+        # API issues
+        api_patterns = ['api', 'fetch', 'load', 'server', 'endpoint', 'request failed']
+        if any(pattern in request_lower for pattern in api_patterns):
+            # Use the new API error handler
+            try:
+                from api_error_handler import APIErrorHandler
+                api_handler = APIErrorHandler()
+                is_api_issue, analysis = api_handler.detect_api_issue(modification_request)
+                if is_api_issue:
+                    return "api_error", analysis
+            except ImportError:
+                pass
+        
+        return None, None
+    
     def apply_ssl_fix(self, files: List[Dict], fix_type: str, **kwargs) -> Dict:
         """Apply SSL-specific fixes to the project files"""
-        # Use robust SSL handler if available
-        if robust_ssl_handler and fix_type == "comprehensive":
+        # Use robust SSL handler if available for better results
+        if robust_ssl_handler:
             domain = kwargs.get("domain", "localhost")
+            print(f"[MODIFICATION] Using robust SSL handler for domain: {domain}")
             return robust_ssl_handler.apply_comprehensive_ssl_fix(files, domain)
         
         if not ssl_handler:
@@ -701,26 +760,78 @@ Return JSON with ALL {len(files)} files:
                         # Insert before closing </dict>
                         insert_pos = content.rfind('</dict>')
                         if insert_pos > 0:
+                            # Check if fix_code is a dictionary with proper structure
+                            if isinstance(fix_code, dict) and 'info_plist_modification' in fix_code:
+                                plist_content = fix_code['info_plist_modification']
+                            else:
+                                # Fallback to default ATS configuration
+                                domain = kwargs.get('domain', 'localhost')
+                                plist_content = f"""    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>{domain}</key>
+            <dict>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSTemporaryExceptionMinimumTLSVersion</key>
+                <string>TLSv1.0</string>
+                <key>NSExceptionRequiresForwardSecrecy</key>
+                <false/>
+            </dict>
+        </dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>"""
+                            
                             new_content = (
                                 content[:insert_pos] + 
-                                fix_code['info_plist_modification'] + 
+                                plist_content + 
                                 '\n' + content[insert_pos:]
                             )
                             modified_files[i] = {
                                 'path': file['path'],
                                 'content': new_content
                             }
-                            changes_made.append(fix_code['description'])
+                            changes_made.append(fix_code.get('description', f'Added ATS exception for {domain}'))
                             files_modified.append(file['path'])
                     break
             
             if not info_plist_found:
                 # Create Info.plist
+                # Check if fix_code has proper structure
+                domain = kwargs.get('domain', 'localhost')
+                if isinstance(fix_code, dict) and 'info_plist_modification' in fix_code:
+                    plist_modification = fix_code['info_plist_modification']
+                else:
+                    # Default ATS configuration
+                    plist_modification = f"""    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>{domain}</key>
+            <dict>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSTemporaryExceptionMinimumTLSVersion</key>
+                <string>TLSv1.0</string>
+                <key>NSExceptionRequiresForwardSecrecy</key>
+                <false/>
+            </dict>
+        </dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>"""
+                
                 info_plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-{fix_code['info_plist_modification']}
+{plist_modification}
 </dict>
 </plist>"""
                 modified_files.append({

@@ -296,6 +296,43 @@ files_to_modify = current_state.get("current_files", context.get("generated_file
 - This prevents the router from thinking modifications are app creation requests
 - Files changed: `backend/enhanced_claude_service.py` (3 locations)
 
+### 14. SSL Fixes Not Being Applied Properly (FIXED: Dec 20, 2024)
+**Problem**: Users reported external API apps (Quote app) failing with SSL errors even after multiple fix attempts
+**Symptoms**:
+- "Failed to load quote!" error in simulator
+- SSL fix code existed but wasn't triggered
+- Info.plist missing NSAppTransportSecurity configuration
+- Fix applied in first detection mechanism but skipped in second
+**Root Cause**:
+- Two separate SSL detection mechanisms not coordinating
+- First mechanism (modification_handler.detect_and_handle_issue) would apply fix and skip normal flow
+- Second mechanism (ssl_handler.detect_ssl_error) set issue_detected flag
+- SSL fix at lines 1428-1470 only ran when issue_detected == "ssl_error"
+- When first mechanism handled SSL, it bypassed the second fix
+**Fix**:
+1. Enhanced SSL detection in main.py:
+   - Added keyword-based detection for SSL-related terms
+   - Modified fix to trigger on either mechanism OR keywords
+   - Changed default domain from "localhost" to actual API domain
+2. Improved modification_handler.py:
+   - Always use robust SSL handler when available
+   - Added fallback ATS configuration
+   - Proper Info.plist creation if missing
+3. Test coverage:
+   - Created test_ssl_fix_integration.py
+   - Verified SSL detection and fix application
+**Files Modified**:
+- `backend/main.py` - Enhanced SSL detection and fix trigger logic
+- `backend/modification_handler.py` - Improved apply_ssl_fix to use robust handler
+- `backend/tests/test_ssl_fix_integration.py` - Added integration tests
+**Files Created**:
+- `backend/SSL_FIX_DOCUMENTATION.md` - Detailed documentation of the fix
+**Benefits**:
+- SSL errors now properly detected through multiple mechanisms
+- Comprehensive SSL fix applied including Info.plist, NetworkConfiguration, and API extensions
+- Works with api.quotable.io and other external APIs
+- Fallback configuration ensures fix works even with malformed responses
+
 ---
 
 ## Recurring Issues

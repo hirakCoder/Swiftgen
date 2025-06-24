@@ -1424,41 +1424,59 @@ DO NOT just make colors dark!"""
                 
                 # Old recovery code removed - using progressive retry above
         
-        # Apply SSL fixes if detected
-        if issue_detected == "ssl_error" and ssl_handler:
+        # Apply SSL fixes if detected (either from first or second detection mechanism)
+        # Also check if the modification request contains SSL-related keywords
+        modification_lower = request.modification.lower()
+        ssl_keywords = ['ssl', 'certificate', 'transport security', 'failed to load', 'failed to fetch', 'api', 'https', 'cleartext']
+        contains_ssl_keywords = any(keyword in modification_lower for keyword in ssl_keywords)
+        
+        if (issue_detected == "ssl_error" or contains_ssl_keywords) and ssl_handler and modification_handler:
             try:
-                print("[MAIN] Applying SSL fixes to the modified code")
+                print("[MAIN] SSL-related issue detected, applying fixes to the modified code")
                 # Analyze the SSL issue properly
                 ssl_analysis = ssl_handler.analyze_ssl_issue(request.modification, project_path)
                 
-                # Get recommended fixes
-                recommended_fixes = ssl_analysis.get("recommended_fixes", [])
-                if recommended_fixes:
-                    fix_type = recommended_fixes[0].get("type", "add_ats_exception")
-                    domain = ssl_analysis.get("domain", "localhost")
+                # Check if we actually have an SSL issue
+                if ssl_analysis.get("has_ssl_error", False) or contains_ssl_keywords:
+                    # Get recommended fixes
+                    recommended_fixes = ssl_analysis.get("recommended_fixes", [])
+                    if not recommended_fixes and contains_ssl_keywords:
+                        # Default to ATS exception if no specific fix recommended
+                        recommended_fixes = [{"type": "add_ats_exception"}]
                     
-                    print(f"[MAIN] Applying SSL fix type: {fix_type} for domain: {domain}")
-                    
-                    # Apply the fix using modification handler
-                    modified_result = modification_handler.apply_ssl_fix(
-                        modified_code.get("files", []),
-                        fix_type,
-                        domain=domain
-                    )
-                    
-                    # Update the modified code with the SSL fixes
-                    modified_code["files"] = modified_result["files"]
-                    
-                    # Track the fix attempt
-                    if fix_verifier:
-                        fix_verifier.track_fix_attempt(
-                            project_id,
-                            "ssl_error",
-                            {"type": fix_type, "domain": domain},
-                            modified_result.get("files_modified", [])
+                    if recommended_fixes:
+                        fix_type = recommended_fixes[0].get("type", "add_ats_exception")
+                        domain = ssl_analysis.get("domain", "api.quotable.io")  # Default to the known API domain
+                        
+                        print(f"[MAIN] Applying SSL fix type: {fix_type} for domain: {domain}")
+                        
+                        # Apply the fix using modification handler
+                        modified_result = modification_handler.apply_ssl_fix(
+                            modified_code.get("files", []),
+                            fix_type,
+                            domain=domain
                         )
-                    
-                    print(f"[MAIN] SSL fix applied: {len(modified_result.get('files_modified', []))} files modified")
+                        
+                        # Update the modified code with the SSL fixes
+                        modified_code["files"] = modified_result["files"]
+                        
+                        # Track the fix attempt
+                        if fix_verifier:
+                            fix_verifier.track_fix_attempt(
+                                project_id,
+                                "ssl_error",
+                                {"type": fix_type, "domain": domain},
+                                modified_result.get("files_modified", [])
+                            )
+                        
+                        print(f"[MAIN] SSL fix applied: {len(modified_result.get('files_modified', []))} files modified")
+                        
+                        # Notify user
+                        await notify_clients(project_id, {
+                            "type": "status",
+                            "message": "🔒 Applied SSL/ATS configuration for external API access",
+                            "status": "ssl_fixed"
+                        })
             except Exception as e:
                 logger.error(f"[MAIN] Error applying SSL fix: {str(e)}")
                 # Continue without SSL fix - don't crash the whole modification
