@@ -2,6 +2,7 @@
 Automatic SSL/API Fixer
 Detects and fixes SSL/API issues during build and modification processes
 """
+import os
 import re
 import json
 import logging
@@ -41,26 +42,24 @@ class AutomaticSSLFixer:
             if file['path'].endswith('.swift'):
                 content = file.get('content', '')
                 
-                # Find all URLs in the code
-                for pattern in self.api_patterns:
+                # Find all URLs in string literals
+                url_patterns = [
+                    r'"(https?://[^"]+)"',  # Double quoted URLs
+                    r"'(https?://[^']+)'",  # Single quoted URLs
+                    r'URL\(string:\s*"(https?://[^"]+)"',  # URL constructor
+                ]
+                
+                for pattern in url_patterns:
                     matches = re.findall(pattern, content, re.IGNORECASE)
-                    for match in matches:
-                        if isinstance(match, tuple):
-                            domain = match[0]
-                        else:
-                            # Extract domain from full URL
-                            url_match = re.search(r'https?://([^/]+)', match)
-                            if url_match:
-                                domain = url_match.group(1)
-                            else:
-                                continue
-                        
-                        # Clean up domain
-                        domain = domain.strip('"\'')
-                        if domain and '.' in domain:
-                            domains.add(domain)
+                    for url in matches:
+                        # Extract domain from URL
+                        domain_match = re.search(r'https?://([^/:]+)', url)
+                        if domain_match:
+                            domain = domain_match.group(1)
+                            if domain and '.' in domain:
+                                domains.add(domain)
         
-        return list(domains)
+        return sorted(list(domains))
     
     def check_info_plist_for_ats(self, files: List[Dict], domains: List[str]) -> Tuple[bool, List[str]]:
         """Check if Info.plist has ATS configuration for the domains"""
@@ -241,20 +240,43 @@ def integrate_with_build_service(build_service_instance):
     ssl_fixer = AutomaticSSLFixer()
     
     # Hook into build process
-    original_build = build_service_instance.build_ios_app
+    original_build = build_service_instance.build_project
     
-    def enhanced_build(project_path, files, **kwargs):
-        # Apply automatic fixes before building
-        fix_result = ssl_fixer.apply_automatic_fixes(files)
+    async def enhanced_build(project_path, project_id, bundle_id, **kwargs):
+        # Read project files to check for SSL issues
+        try:
+            # Get all Swift and plist files
+            files = []
+            for root, dirs, filenames in os.walk(project_path):
+                for filename in filenames:
+                    if filename.endswith(('.swift', '.plist')):
+                        filepath = os.path.join(root, filename)
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            files.append({
+                                'path': os.path.relpath(filepath, project_path),
+                                'content': f.read()
+                            })
+            
+            # Apply automatic fixes
+            fix_result = ssl_fixer.apply_automatic_fixes(files)
+            
+            if fix_result['success']:
+                logger.info(f"Applied automatic SSL fixes: {fix_result['fixes_applied']}")
+                
+                # Write fixed files back
+                for file in fix_result['files']:
+                    filepath = os.path.join(project_path, file['path'])
+                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(file['content'])
         
-        if fix_result['success']:
-            logger.info(f"Applied automatic SSL fixes: {fix_result['fixes_applied']}")
-            files = fix_result['files']
+        except Exception as e:
+            logger.warning(f"SSL auto-fix failed: {e}")
         
         # Continue with normal build
-        return original_build(project_path, files, **kwargs)
+        return await original_build(project_path, project_id, bundle_id, **kwargs)
     
-    build_service_instance.build_ios_app = enhanced_build
+    build_service_instance.build_project = enhanced_build
 
 
 def integrate_with_modification_handler(modification_handler_instance):
