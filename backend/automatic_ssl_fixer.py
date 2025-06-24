@@ -242,7 +242,7 @@ def integrate_with_build_service(build_service_instance):
     # Hook into build process
     original_build = build_service_instance.build_project
     
-    async def enhanced_build(project_path, project_id, bundle_id, **kwargs):
+    async def enhanced_build(project_path, project_id, bundle_id, app_complexity=None, **kwargs):
         # Read project files to check for SSL issues
         try:
             # Get all Swift and plist files
@@ -274,7 +274,7 @@ def integrate_with_build_service(build_service_instance):
             logger.warning(f"SSL auto-fix failed: {e}")
         
         # Continue with normal build
-        return await original_build(project_path, project_id, bundle_id, **kwargs)
+        return await original_build(project_path, project_id, bundle_id, app_complexity, **kwargs)
     
     build_service_instance.build_project = enhanced_build
 
