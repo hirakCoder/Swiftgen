@@ -76,6 +76,14 @@ except ImportError:
     fix_verifier = None
 
 try:
+    from automatic_ssl_fixer import AutomaticSSLFixer, integrate_with_build_service, integrate_with_modification_handler
+    auto_ssl_fixer = AutomaticSSLFixer()
+    print("✓ Automatic SSL Fixer initialized")
+except ImportError:
+    print("Warning: AutomaticSSLFixer not available")
+    auto_ssl_fixer = None
+
+try:
     from pre_generation_validator import PreGenerationValidator
     pre_generation_validator = PreGenerationValidator(rag_kb=rag_knowledge_base if 'rag_knowledge_base' in locals() else None)
 except ImportError:
@@ -159,6 +167,15 @@ except Exception as e:
 # Store active connections and project contexts
 active_connections: dict = {}
 project_contexts: dict = {}
+
+# Integrate automatic SSL fixer with services
+if auto_ssl_fixer:
+    if build_service:
+        integrate_with_build_service(build_service)
+        print("✓ Automatic SSL Fixer integrated with build service")
+    if modification_handler:
+        integrate_with_modification_handler(modification_handler)
+        print("✓ Automatic SSL Fixer integrated with modification handler")
 project_state: dict = {}
 
 # Generation statistics
@@ -1614,10 +1631,28 @@ DO NOT just make colors dark!"""
             "message": "📝 Applying intelligent modifications...",
             "status": "updating"
         })
+        
+        # Apply automatic SSL fixes before updating files
+        files_to_update = modified_code.get("files", [])
+        if auto_ssl_fixer:
+            ssl_fix_result = auto_ssl_fixer.apply_automatic_fixes(
+                files_to_update,
+                user_report=request.modification
+            )
+            
+            if ssl_fix_result['success']:
+                files_to_update = ssl_fix_result['files']
+                print(f"[MAIN] Applied automatic SSL fixes: {ssl_fix_result['fixes_applied']}")
+                
+                await notify_clients(project_id, {
+                    "type": "status",
+                    "message": f"🔐 Applied automatic SSL fixes for {len(ssl_fix_result['domains_fixed'])} domains",
+                    "status": "ssl_auto_fixed"
+                })
 
         await project_manager.update_project_files(
             project_id,
-            modified_code.get("files", [])
+            files_to_update
         )
 
         # Rebuild
