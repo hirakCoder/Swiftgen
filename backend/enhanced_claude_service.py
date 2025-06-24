@@ -10,6 +10,12 @@ import anthropic
 import requests
 from dotenv import load_dotenv
 
+# Import JSON fixer
+try:
+    from json_fixer import extract_and_fix_json
+except ImportError:
+    extract_and_fix_json = None
+
 # Import intelligent router
 try:
     from intelligent_llm_router import IntelligentLLMRouter, RequestType
@@ -265,7 +271,16 @@ Return a JSON response with this EXACT structure:
                     result = result[7:]
                 if result.endswith("```"):
                     result = result[:-3]
-                result = json.loads(result)
+                
+                # Try to parse with fixes if regular parsing fails
+                try:
+                    result = json.loads(result)
+                except json.JSONDecodeError as e:
+                    if extract_and_fix_json:
+                        logger.warning(f"JSON parse error, attempting fix: {e}")
+                        result = extract_and_fix_json(result)
+                    else:
+                        raise
             
             # Check for truncated code
             if "files" in result:
@@ -696,7 +711,15 @@ IMPORTANT: The "changes_made" array must contain SPECIFIC, CONCRETE changes you 
                         # Extract JSON object
                         json_match = re.search(r'\{[\s\S]*\}', result)
                         if json_match:
-                            result = json.loads(json_match.group(0))
+                            # Try to parse with fixes if regular parsing fails
+                            try:
+                                result = json.loads(json_match.group(0))
+                            except json.JSONDecodeError as parse_err:
+                                if extract_and_fix_json:
+                                    logger.warning(f"JSON parse error in fallback, attempting fix: {parse_err}")
+                                    result = extract_and_fix_json(json_match.group(0))
+                                else:
+                                    raise
                         else:
                             raise ValueError("No JSON object found")
                     except Exception as e3:

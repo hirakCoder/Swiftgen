@@ -169,13 +169,14 @@ active_connections: dict = {}
 project_contexts: dict = {}
 
 # Integrate automatic SSL fixer with services
-if auto_ssl_fixer:
-    if build_service:
-        integrate_with_build_service(build_service)
-        print("✓ Automatic SSL Fixer integrated with build service")
-    if modification_handler:
-        integrate_with_modification_handler(modification_handler)
-        print("✓ Automatic SSL Fixer integrated with modification handler")
+# TEMPORARILY DISABLED DUE TO ISSUES
+# if auto_ssl_fixer:
+#     if build_service:
+#         integrate_with_build_service(build_service)
+#         print("✓ Automatic SSL Fixer integrated with build service")
+#     if modification_handler:
+#         integrate_with_modification_handler(modification_handler)
+#         print("✓ Automatic SSL Fixer integrated with modification handler")
 project_state: dict = {}
 
 # Generation statistics
@@ -1634,21 +1635,22 @@ DO NOT just make colors dark!"""
         
         # Apply automatic SSL fixes before updating files
         files_to_update = modified_code.get("files", [])
-        if auto_ssl_fixer:
-            ssl_fix_result = auto_ssl_fixer.apply_automatic_fixes(
-                files_to_update,
-                user_report=request.modification
-            )
-            
-            if ssl_fix_result['success']:
-                files_to_update = ssl_fix_result['files']
-                print(f"[MAIN] Applied automatic SSL fixes: {ssl_fix_result['fixes_applied']}")
-                
-                await notify_clients(project_id, {
-                    "type": "status",
-                    "message": f"🔐 Applied automatic SSL fixes for {len(ssl_fix_result['domains_fixed'])} domains",
-                    "status": "ssl_auto_fixed"
-                })
+        # TEMPORARILY DISABLED DUE TO ISSUES
+        # if auto_ssl_fixer:
+        #     ssl_fix_result = auto_ssl_fixer.apply_automatic_fixes(
+        #         files_to_update,
+        #         user_report=request.modification
+        #     )
+        #     
+        #     if ssl_fix_result['success']:
+        #         files_to_update = ssl_fix_result['files']
+        #         print(f"[MAIN] Applied automatic SSL fixes: {ssl_fix_result['fixes_applied']}")
+        #         
+        #         await notify_clients(project_id, {
+        #             "type": "status",
+        #             "message": f"🔐 Applied automatic SSL fixes for {len(ssl_fix_result['domains_fixed'])} domains",
+        #             "status": "ssl_auto_fixed"
+        #         })
 
         await project_manager.update_project_files(
             project_id,
