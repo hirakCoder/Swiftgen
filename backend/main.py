@@ -168,15 +168,32 @@ except Exception as e:
 active_connections: dict = {}
 project_contexts: dict = {}
 
-# Integrate automatic SSL fixer with services
-# TEMPORARILY DISABLED DUE TO ISSUES
-# if auto_ssl_fixer:
-#     if build_service:
-#         integrate_with_build_service(build_service)
-#         print("✓ Automatic SSL Fixer integrated with build service")
-#     if modification_handler:
-#         integrate_with_modification_handler(modification_handler)
-#         print("✓ Automatic SSL Fixer integrated with modification handler")
+# Initialize User Communication Service
+try:
+    from user_communication_service import user_comm_service
+    # Will set the callback later when we have notify_clients
+    print("✓ User Communication Service initialized")
+except Exception as e:
+    print(f"Warning: User Communication Service not available: {e}")
+    user_comm_service = None
+
+# Apply BuildService error communication patch
+try:
+    from build_service_patch import apply_build_service_patch
+    if apply_build_service_patch():
+        print("✓ BuildService enhanced with error communication")
+except Exception as e:
+    print(f"Warning: Could not enhance BuildService: {e}")
+
+# Integrate automatic SSL fixer with services using safe wrapper
+try:
+    from safe_ssl_integration import safe_integrate_ssl_fixer
+    if auto_ssl_fixer:
+        safe_integrate_ssl_fixer(auto_ssl_fixer, build_service, modification_handler)
+        print("✓ Automatic SSL Fixer safely integrated with validation checks")
+except Exception as e:
+    print(f"Warning: SSL fixer integration failed: {e}")
+    # Continue without SSL fixer - it's not critical for basic functionality
 project_state: dict = {}
 
 # Generation statistics
@@ -2326,6 +2343,13 @@ async def startup_event():
     print(f"✓ RAG Knowledge Base: {'Active' if rag_knowledge_base else 'Disabled'}")
     print(f"✓ Simulator Service: {'Available' if simulator_service else 'Not available'}")
     print(f"✓ Runtime Error Handler: {'Available' if runtime_handler else 'Not available'}")
+    
+    # Set up User Communication Service callback
+    global user_comm_service
+    if user_comm_service:
+        user_comm_service.set_notify_callback(notify_clients)
+        print(f"✓ User Communication Service: Connected to WebSocket")
+    
     print("="*60)
 
     # Show which LLMs are available
