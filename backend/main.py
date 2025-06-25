@@ -872,16 +872,7 @@ Important: Return ONLY valid JSON, no explanatory text."""
         except Exception as e:
             print(f"[MAIN] Swift validation error: {e}")
         
-        # Quick fix for currency converter and API apps
-        try:
-            description_lower = request.description.lower()
-            if any(keyword in description_lower for keyword in ['currency', 'converter', 'exchange rate', 'api', 'weather', 'quote']):
-                print("[MAIN] Detected API-based app, applying SSL configuration...")
-                from quick_ssl_fix import ensure_currency_api_works
-                generated_code["files"] = ensure_currency_api_works(generated_code["files"])
-                print("[MAIN] SSL configuration applied for API access")
-        except Exception as e:
-            print(f"[MAIN] SSL fix error (non-critical): {e}")
+        # SSL fix will be applied after project creation
 
         # Step 3: Create project
         await notify_clients(project_id, {
@@ -926,6 +917,19 @@ Important: Return ONLY valid JSON, no explanatory text."""
         project_metadata_path = os.path.join(project_path, "project.json")
         with open(project_metadata_path, 'w') as f:
             json.dump(project_metadata, f, indent=2)
+        
+        # Apply SSL fix for API-based apps AFTER project creation
+        try:
+            description_lower = request.description.lower()
+            if any(keyword in description_lower for keyword in ['currency', 'converter', 'exchange rate', 'api', 'weather', 'quote']):
+                print(f"[MAIN] Applying SSL fix to {project_path}")
+                from EMERGENCY_CURRENCY_FIX import fix_currency_converter_issues
+                # Extract project ID from path
+                project_id_for_fix = os.path.basename(project_path)
+                fix_currency_converter_issues(project_id_for_fix)
+                print("[MAIN] SSL configuration and fixes applied")
+        except Exception as e:
+            print(f"[MAIN] SSL fix error: {e}")
 
         # Store initial state - DON'T store files to prevent memory issues
         project_state[project_id] = {
