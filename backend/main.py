@@ -1506,17 +1506,36 @@ DO NOT just make colors dark!"""
                         
                         print(f"[MAIN] SSL fix applied: {len(modified_result.get('files_modified', []))} files modified")
                         
-                        # Notify user
-                        await notify_clients(project_id, {
-                            "type": "status",
-                            "message": "🔒 Applied SSL/ATS configuration for external API access",
-                            "status": "ssl_fixed"
-                        })
+                        # Notify user with detailed information
+                        if user_comm_service:
+                            await user_comm_service.notify_status(
+                                project_id,
+                                f"🔒 Applied SSL/ATS configuration for {domain}",
+                                "ssl_fixed"
+                            )
+                            # Add chat message with details
+                            await notify_clients(project_id, {
+                                "type": "chat_response",
+                                "message": f"✅ I've configured your app to connect to {domain} securely. The app should now be able to fetch data from the external API."
+                            })
+                        else:
+                            await notify_clients(project_id, {
+                                "type": "status",
+                                "message": "🔒 Applied SSL/ATS configuration for external API access",
+                                "status": "ssl_fixed"
+                            })
             except Exception as e:
                 logger.error(f"[MAIN] Error applying SSL fix: {str(e)}")
-                # Continue without SSL fix - don't crash the whole modification
-                await notify_clients(project_id, {
-                    "type": "status",
+                # Notify user about SSL error with guidance
+                if user_comm_service:
+                    await user_comm_service.notify_error(
+                        project_id,
+                        f"SSL configuration error: {str(e)}",
+                        {"domain": domain if 'domain' in locals() else "unknown"}
+                    )
+                else:
+                    await notify_clients(project_id, {
+                        "type": "status",
                     "message": "⚠️ SSL fix encountered an issue, continuing with modification...",
                     "status": "warning"
                 })

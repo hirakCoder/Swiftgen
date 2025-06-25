@@ -18,6 +18,8 @@ class UserCommunicationService:
             "certificate": "Security certificate issue detected. Adding necessary permissions...",
             "transport security": "Network security settings need adjustment. Fixing now...",
             "Failed to load": "The app couldn't fetch data from the server. Checking network settings...",
+            "api.quotable.io": "Setting up access to quote API service...",
+            "external API": "Configuring network permissions for external APIs...",
             
             # JSON/Parsing errors
             "Invalid \\escape": "Code formatting issue detected. Applying automatic fixes...",
@@ -66,12 +68,18 @@ class UserCommunicationService:
         """Send user-friendly error notification"""
         user_message = self.translate_error(error)
         
+        # Add actionable guidance based on error type
+        suggestion = self._get_suggestion(error)
+        
         notification = {
             "type": "error",
             "message": user_message,
             "technical_details": error,  # For debug mode
             "status": "error",
         }
+        
+        if suggestion:
+            notification["suggestion"] = suggestion
         
         if context:
             notification.update(context)
@@ -81,6 +89,30 @@ class UserCommunicationService:
         
         if self.notify_callback:
             await self.notify_callback(project_id, notification)
+    
+    def _get_suggestion(self, error: str) -> Optional[str]:
+        """Get actionable suggestion for user based on error"""
+        error_lower = error.lower()
+        
+        if "ssl" in error_lower or "certificate" in error_lower:
+            if "localhost" in error_lower or "127.0.0.1" in error_lower:
+                return "For local development servers, the app needs special permissions. Try using a public API instead, or ask me to add development server support."
+            else:
+                return "I'm adding security permissions for external APIs. This should be fixed automatically in the next build."
+        
+        elif "failed to load" in error_lower or "api" in error_lower:
+            return "The external API might be down or require authentication. Try checking if the API is accessible in your browser."
+        
+        elif "json" in error_lower or "parse" in error_lower:
+            return "The code format needs adjustment. I'll try a different approach automatically."
+        
+        elif "timeout" in error_lower:
+            return "The request is taking too long. Try simplifying your app or breaking it into smaller features."
+        
+        elif "no modifications processed" in error_lower:
+            return "Try describing your change differently, or ask for one specific change at a time."
+        
+        return None
     
     async def notify_status(self, project_id: str, message: str, status: str = "processing"):
         """Send status update to UI"""
@@ -102,6 +134,21 @@ class UserCommunicationService:
             "total": total,
             "message": f"{step}: {progress}% complete"
         }
+        
+        if self.notify_callback:
+            await self.notify_callback(project_id, notification)
+    
+    async def notify_manual_action_needed(self, project_id: str, issue: str, action_required: str, how_to_fix: str):
+        """Notify user when manual intervention is required"""
+        notification = {
+            "type": "manual_action",
+            "message": f"⚠️ {issue}",
+            "action_required": action_required,
+            "how_to_fix": how_to_fix,
+            "status": "needs_action"
+        }
+        
+        logger.info(f"Manual action required: {issue}")
         
         if self.notify_callback:
             await self.notify_callback(project_id, notification)
