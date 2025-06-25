@@ -177,23 +177,11 @@ except Exception as e:
     print(f"Warning: User Communication Service not available: {e}")
     user_comm_service = None
 
-# Apply BuildService error communication patch
-try:
-    from build_service_patch import apply_build_service_patch
-    if apply_build_service_patch():
-        print("✓ BuildService enhanced with error communication")
-except Exception as e:
-    print(f"Warning: Could not enhance BuildService: {e}")
+# Skip BuildService patch - it's causing dict/string errors
+# The patch sends dict objects where strings are expected
 
-# Integrate automatic SSL fixer with services using safe wrapper
-try:
-    from safe_ssl_integration import safe_integrate_ssl_fixer
-    if auto_ssl_fixer:
-        safe_integrate_ssl_fixer(auto_ssl_fixer, build_service, modification_handler)
-        print("✓ Automatic SSL Fixer safely integrated with validation checks")
-except Exception as e:
-    print(f"Warning: SSL fixer integration failed: {e}")
-    # Continue without SSL fixer - it's not critical for basic functionality
+# Skip safe SSL integration - using quick fix instead
+# The safe wrapper was too restrictive and causing issues
 project_state: dict = {}
 
 # Generation statistics
@@ -486,7 +474,7 @@ def _is_complex_app(description: str) -> bool:
         "enterprise", "production", "scalable", "professional",
         "real-world", "commercial", "business",
         # Feature complexity
-        "api", "backend", "server", "database", "cloud",
+        "backend", "server", "database", "cloud",
         "authentication", "login", "user accounts",
         "real-time", "chat", "messaging", "notifications",
         "payment", "subscription", "in-app purchase",
@@ -504,6 +492,11 @@ def _is_complex_app(description: str) -> bool:
         "analytics", "crash reporting",
         "multiple screens", "complex navigation"
     ]
+    
+    # Simple apps that should NOT be marked as complex
+    simple_apps = ["currency converter", "calculator", "timer", "counter", "converter", "weather app"]
+    if any(app in description_lower for app in simple_apps):
+        return False
     
     # Count matches
     matches = sum(1 for indicator in complex_indicators if indicator in description_lower)
@@ -878,6 +871,17 @@ Important: Return ONLY valid JSON, no explanatory text."""
                 
         except Exception as e:
             print(f"[MAIN] Swift validation error: {e}")
+        
+        # Quick fix for currency converter and API apps
+        try:
+            description_lower = request.description.lower()
+            if any(keyword in description_lower for keyword in ['currency', 'converter', 'exchange rate', 'api', 'weather', 'quote']):
+                print("[MAIN] Detected API-based app, applying SSL configuration...")
+                from quick_ssl_fix import ensure_currency_api_works
+                generated_code["files"] = ensure_currency_api_works(generated_code["files"])
+                print("[MAIN] SSL configuration applied for API access")
+        except Exception as e:
+            print(f"[MAIN] SSL fix error (non-critical): {e}")
 
         # Step 3: Create project
         await notify_clients(project_id, {

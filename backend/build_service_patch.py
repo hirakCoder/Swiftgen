@@ -20,14 +20,8 @@ def patch_build_service(build_service_class):
             if is_error or any(indicator in message.lower() for indicator in ['error', 'failed', 'timeout', 'not found', '❌']):
                 # For errors, ensure it shows in the UI
                 if self.status_callback:
-                    # Send as both status and error for visibility
+                    # Only send string messages to status callback
                     await self.status_callback(message)
-                    # Also send as error type for proper UI handling
-                    await self.status_callback({
-                        "type": "error",
-                        "message": message,
-                        "status": "error"
-                    })
             else:
                 # Normal status update
                 if self.status_callback:
