@@ -832,11 +832,15 @@ class AgentOrchestrator:
     """Orchestrates multiple specialized agents"""
     
     def __init__(self, model=None):
+        # Import AppleDesignAgent here to avoid circular imports
+        from apple_design_agent import AppleDesignAgent
+        
         self.agents = [
             CodeGenerationAgent(model),
             ModificationAgent(model),
             DebugAgent(model),
-            # Add more agents: UIAgent, APIAgent, etc.
+            AppleDesignAgent(model),  # UI/UX specialist
+            # Add more agents: APIAgent, DataAgent, etc.
         ]
         self.request_history = []
     
