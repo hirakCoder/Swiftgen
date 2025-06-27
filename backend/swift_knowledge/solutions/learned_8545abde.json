@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: Sources/Models/CurrencyRate.swift:9:11: error: exp...",
+  "content": "Error: Sources/Models/CurrencyRate.swift:9:11: error: expected declaration; Sources/Models/CurrencyRate.swift:9:17: error: circular reference; Sources/Models/CurrencyRate.swift:3:8: error: type 'CurrencyRate' does not conform to protocol 'Decodable'\n\nSolution: Fixed 5 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 5 errors using RAG patterns"
+  ]
+}

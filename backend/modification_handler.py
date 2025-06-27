@@ -442,23 +442,27 @@ Return JSON with ALL {len(files)} files:
                     lines = content.split('\n')
                     import_index = next((i for i, line in enumerate(lines) if 'import SwiftUI' in line), 0)
                     
-                    # Insert after imports
+                    # Insert after imports but before body
                     for i in range(import_index + 1, len(lines)):
                         if 'struct' in lines[i] and 'App' in lines[i]:
-                            # Found the App struct, add theme storage
+                            # Found the App struct declaration
                             indent = '    '
-                            lines.insert(i + 2, f'{indent}@AppStorage("isDarkMode") private var isDarkMode = false')
+                            # Insert on the next line after the struct declaration
+                            lines.insert(i + 1, f'{indent}@AppStorage("isDarkMode") private var isDarkMode = false')
+                            lines.insert(i + 2, '')  # Add blank line for readability
                             break
                     
                     # Add preferredColorScheme modifier to WindowGroup
                     for i, line in enumerate(lines):
                         if 'WindowGroup' in line:
                             # Find the closing brace of WindowGroup
-                            brace_count = 0
-                            for j in range(i, len(lines)):
+                            brace_count = 1  # Start with 1 since WindowGroup has opening brace
+                            for j in range(i + 1, len(lines)):
                                 brace_count += lines[j].count('{') - lines[j].count('}')
-                                if brace_count == 0 and '}' in lines[j]:
-                                    lines.insert(j + 1, '        .preferredColorScheme(isDarkMode ? .dark : .light)')
+                                if brace_count == 0:
+                                    # Found the closing brace, insert before it
+                                    indent = '        '
+                                    lines[j] = f'{indent}.preferredColorScheme(isDarkMode ? .dark : .light)\n{lines[j]}'
                                     break
                             break
                     
@@ -476,7 +480,9 @@ Return JSON with ALL {len(files)} files:
                     for i, line in enumerate(lines):
                         if 'struct' in line and 'View' in line:
                             indent = '    '
-                            lines.insert(i + 2, f'{indent}@AppStorage("isDarkMode") private var isDarkMode = false')
+                            # Insert after struct declaration
+                            lines.insert(i + 1, f'{indent}@AppStorage("isDarkMode") private var isDarkMode = false')
+                            lines.insert(i + 2, '')  # Add blank line
                             break
                     
                     # Add toggle to the view body
@@ -499,21 +505,38 @@ Return JSON with ALL {len(files)} files:
                     
                     # If no toolbar found, add it to the main view
                     if not added_toggle:
-                        for i in range(len(lines) - 1, -1, -1):
-                            if '}' in lines[i] and lines[i].strip() == '}':
-                                # Found closing brace of body
-                                indent = '        '
-                                lines.insert(i, f'{indent}.safeAreaInset(edge: .top) {{')
-                                lines.insert(i + 1, f'{indent}    HStack {{')
-                                lines.insert(i + 2, f'{indent}        Spacer()')
-                                lines.insert(i + 3, f'{indent}        Toggle(isOn: $isDarkMode) {{')
-                                lines.insert(i + 4, f'{indent}            Label(isDarkMode ? "Dark" : "Light", systemImage: isDarkMode ? "moon.fill" : "sun.max.fill")')
-                                lines.insert(i + 5, f'{indent}        }}')
-                                lines.insert(i + 6, f'{indent}        .toggleStyle(SwitchToggleStyle())')
-                                lines.insert(i + 7, f'{indent}        .padding()')
-                                lines.insert(i + 8, f'{indent}    }}')
-                                lines.insert(i + 9, f'{indent}}}')
+                        # Find the main view body
+                        body_start = -1
+                        for i, line in enumerate(lines):
+                            if 'var body: some View' in line:
+                                body_start = i
                                 break
+                        
+                        if body_start >= 0:
+                            # Find the closing brace of the main VStack/container
+                            brace_count = 0
+                            view_start = -1
+                            for i in range(body_start, len(lines)):
+                                if view_start == -1 and '{' in lines[i]:
+                                    view_start = i
+                                if view_start >= 0:
+                                    brace_count += lines[i].count('{') - lines[i].count('}')
+                                    if brace_count == 1 and '}' in lines[i]:
+                                        # Found the closing brace of the main view
+                                        indent = '        '
+                                        # Insert the modifier before the closing brace
+                                        lines[i] = lines[i].replace('}', f'''.safeAreaInset(edge: .top) {{
+{indent}    HStack {{
+{indent}        Spacer()
+{indent}        Toggle(isOn: $isDarkMode) {{
+{indent}            Label(isDarkMode ? "Dark" : "Light", systemImage: isDarkMode ? "moon.fill" : "sun.max.fill")
+{indent}        }}
+{indent}        .toggleStyle(SwitchToggleStyle())
+{indent}        .padding()
+{indent}    }}
+{indent}}}
+}}''', 1)  # Replace only the first closing brace
+                                        break
                     
                     content = '\n'.join(lines)
                     modified = True

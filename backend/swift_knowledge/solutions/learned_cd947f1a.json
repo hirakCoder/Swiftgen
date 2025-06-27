@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: Sources/Views/Components/CurrencyInputView.swift:1...",
+  "content": "Error: Sources/Views/Components/CurrencyInputView.swift:13:17: error: generic struct 'Picker' requires that 'CurrencyRate' conform to 'Hashable'; Sources/Views/Components/CurrencyInputView.swift:13:17: error: initializer 'init(_:selection:content:)' requires that 'CurrencyRate' conform to 'Hashable'; Sources/Views/Components/CurrencyInputView.swift:16:30: error: referencing instance method 'tag(_:includeOptional:)' on 'Optional' requires that 'CurrencyRate' conform to 'Hashable'\n\nSolution: Fixed 4 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 4 errors using RAG patterns"
+  ]
+}

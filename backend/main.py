@@ -72,16 +72,19 @@ try:
     from fix_verification_system import FixVerificationSystem
     fix_verifier = FixVerificationSystem()
 except ImportError:
-    print("Warning: FixVerificationSystem not available")
+    # FixVerificationSystem is optional - not required for core functionality
     fix_verifier = None
 
 try:
     from automatic_ssl_fixer import AutomaticSSLFixer, integrate_with_build_service, integrate_with_modification_handler
+    from swift_validator_integration import integrate_validator_with_main_services
     auto_ssl_fixer = AutomaticSSLFixer()
     print("✓ Automatic SSL Fixer initialized")
 except ImportError:
     print("Warning: AutomaticSSLFixer not available")
     auto_ssl_fixer = None
+    integrate_with_build_service = None
+    integrate_with_modification_handler = None
 
 try:
     from pre_generation_validator import PreGenerationValidator
@@ -131,8 +134,19 @@ enhanced_service = EnhancedClaudeService()
 project_manager = ProjectManager()
 chat_response_generator = ChatResponseGenerator()
 
+# Integrate automatic SSL fixer with modification handler if available
+if modification_handler and auto_ssl_fixer and integrate_with_modification_handler:
+    integrate_with_modification_handler(modification_handler)
+    print("✓ Automatic SSL Fixer integrated with ModificationHandler")
+
 # Initialize build service with enhanced recovery
 build_service = BuildService()
+
+# Integrate automatic SSL fixer with build service
+if auto_ssl_fixer and integrate_with_build_service:
+    integrate_with_build_service(build_service)
+    print("✓ Automatic SSL Fixer integrated with BuildService")
+
 
 # CRITICAL: Share the enhanced service with error recovery system
 if hasattr(build_service, 'error_recovery_system') and build_service.error_recovery_system:
@@ -144,6 +158,16 @@ self_healing_generator = SelfHealingGenerator(
     rag_kb=rag_knowledge_base,
     llm_service=enhanced_service
 )
+
+# Integrate Swift validator for syntax validation and fixes
+try:
+    integrate_validator_with_main_services(
+        build_service=build_service,
+        self_healing_generator=self_healing_generator
+    )
+except Exception as e:
+    print(f"⚠️  Could not integrate Swift validator: {e}")
+    # System continues to work without validator
 
 qa_pipeline = QualityAssurancePipeline(
     rag_kb=rag_knowledge_base
@@ -1629,9 +1653,18 @@ DO NOT just make colors dark!"""
             modified_code["files"] = fixed_files
         
         # Update project state - DON'T store full file contents to prevent memory bloat
+        # Initialize project state if it doesn't exist (e.g., after server restart)
+        if project_id not in project_state:
+            project_state[project_id] = {
+                "status": "active",
+                "app_name": project_id,
+                "version": 0,
+                "created_at": datetime.now().isoformat()
+            }
+        
         project_state[project_id]["file_count"] = len(modified_code.get("files", []))
         project_state[project_id]["last_modified"] = datetime.now().isoformat()
-        project_state[project_id]["version"] += 1
+        project_state[project_id]["version"] = project_state[project_id].get("version", 0) + 1
         # Remove the problematic current_files that causes stale state
         if "current_files" in project_state[project_id]:
             del project_state[project_id]["current_files"]

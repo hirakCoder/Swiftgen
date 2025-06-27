@@ -1,0 +1,8 @@
+{
+  "repo": "WhatsNewKit",
+  "description": "Showcase your awesome new app features \ud83d\udcf1",
+  "file_path": "Package.swift",
+  "content": "// swift-tools-version: 5.9\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"WhatsNewKit\",\n    platforms: [\n        .iOS(.v13),\n        .macOS(.v11),\n        .visionOS(.v1)\n    ],\n    products: [\n        .library(\n            name: \"WhatsNewKit\",\n            targets: [\n                \"WhatsNewKit\"\n            ]\n        )\n    ],\n    targets: [\n        .target(\n            name: \"WhatsNewKit\",\n            path: \"Sources\",\n            resources: [\n                .process(\"Resources/PrivacyInfo.xcprivacy\")\n            ]\n        ),\n        .testTarget(\n            name: \"WhatsNewKitTests\",\n            dependencies: [\n                \"WhatsNewKit\"\n            ],\n            path: \"Tests\"\n        )\n    ]\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:28.030399"
+}

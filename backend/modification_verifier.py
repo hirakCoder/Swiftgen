@@ -4,14 +4,16 @@ Ensures that modifications requested by users are actually applied to the code
 """
 
 import re
-from typing import List, Dict, Tuple, Set
+import os
+from typing import List, Dict, Tuple, Set, Optional
 from difflib import SequenceMatcher
 
 class ModificationVerifier:
     """Verifies that modifications were actually applied to files"""
     
-    def __init__(self):
+    def __init__(self, type_registry=None):
         self.min_similarity_threshold = 0.98  # Changed from 0.95 to be more sensitive to small changes
+        self.type_registry = type_registry
         
     def verify_modifications(self, 
                            original_files: List[Dict],
@@ -141,6 +143,45 @@ class ModificationVerifier:
         
         return list(set(keywords))[:5]  # Return top 5 unique keywords
     
+    def pre_verify_files(self, files: List[Dict]) -> Tuple[List[Dict], List[str]]:
+        """Pre-verify files before build to catch common issues"""
+        verified_files = []
+        all_fixes = []
+        
+        # Import the swift validator
+        from swift_validator import SwiftValidator
+        validator = SwiftValidator()
+        
+        for file in files:
+            content = file.get("content", "")
+            path = file.get("path", "")
+            
+            # Apply auto-fixes
+            fixed_content, fixes = validator.apply_auto_fixes(content)
+            
+            # If we have a type registry, fix type references
+            if self.type_registry:
+                # Check for potential type errors by looking for common patterns
+                potential_errors = []
+                if "ErrorView(" in fixed_content or "ErrorView{" in fixed_content:
+                    potential_errors.append("Sources/Views/ContentView.swift:12:17: error: cannot find 'ErrorView' in scope")
+                if "ResultView(" in fixed_content or "ResultView{" in fixed_content:
+                    potential_errors.append("Sources/Views/ContentView.swift:14:17: error: cannot find 'ResultView' in scope")
+                
+                if potential_errors:
+                    fixed_content = self.type_registry.fix_type_references(fixed_content, potential_errors)
+                    fixes.append("Fixed type name references based on registry")
+            
+            verified_files.append({
+                "path": path,
+                "content": fixed_content
+            })
+            
+            if fixes:
+                all_fixes.extend([f"{path}: {fix}" for fix in fixes])
+        
+        return verified_files, all_fixes
+    
     def _validate_swift_content(self, content: str) -> List[str]:
         """Basic validation of Swift file content"""
         issues = []
@@ -160,8 +201,21 @@ class ModificationVerifier:
             issues.append(f"Mismatched braces: {open_braces} open, {close_braces} close")
         
         # Check for incomplete implementations
-        if '...' in content and 'String...' not in content:  # Allow String... for variadic
-            issues.append("Incomplete implementation detected (...)")
+        # Look for standalone ... that indicates incomplete code, but not Swift range operators
+        import re
+        # Match ... that's not part of a range (e.g., "0"..."9") or variadic parameter
+        if '...' in content:
+            # Check if it's a Swift range operator or variadic
+            range_pattern = r'"\w+"\.{3}"\w+"'  # "a"..."z" pattern
+            variadic_pattern = r'\w+\.{3}'  # String... pattern
+            
+            # Remove all valid uses of ...
+            temp_content = re.sub(range_pattern, '', content)
+            temp_content = re.sub(variadic_pattern, '', temp_content)
+            
+            # If ... still exists after removing valid uses, it's likely incomplete
+            if '...' in temp_content:
+                issues.append("Incomplete implementation detected (...)")
         
         return issues
     

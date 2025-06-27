@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: error: Multiple commands produce '/Users/hirakbane...",
+  "content": "Error: error: Multiple commands produce '/Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/workspaces/proj_fe8687a7/build/Build/Products/Debug-iphonesimulator/CurrencyCoolConvert.app/Info.plist'; The following build commands failed:\n\nSolution: Fixed 2 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 2 errors using RAG patterns"
+  ]
+}

@@ -1,0 +1,374 @@
+{
+  "timestamp": "2025-06-26T11:56:47.171653",
+  "swiftlint_available": true,
+  "validator_tests": {
+    "swiftc": true,
+    "semicolon_fix": false
+  },
+  "app_generation": {
+    "calculator": {
+      "description": "Create a scientific calculator app with history",
+      "expected_files": [
+        "CalculatorView",
+        "CalculatorViewModel",
+        "CalculatorButton"
+      ],
+      "common_errors": [
+        "Hashable conformance",
+        "ForEach without id"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "Hashable conformance",
+        "ForEach without id"
+      ]
+    },
+    "notes": {
+      "description": "Create a note-taking app with categories and search",
+      "expected_files": [
+        "Note",
+        "NoteView",
+        "NotesListView",
+        "CategoryView"
+      ],
+      "common_errors": [
+        "Missing Codable",
+        "State management"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "Missing Codable",
+        "State management"
+      ]
+    },
+    "timer": {
+      "description": "Create a pomodoro timer app with notifications",
+      "expected_files": [
+        "TimerView",
+        "TimerViewModel",
+        "SettingsView"
+      ],
+      "common_errors": [
+        "Timer syntax",
+        "@Published properties"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "Timer syntax",
+        "@Published properties"
+      ]
+    },
+    "stock_tracker": {
+      "description": "Create a stock market tracker with real-time prices",
+      "expected_files": [
+        "StockService",
+        "StockModel",
+        "StockListView"
+      ],
+      "common_errors": [
+        "Missing imports",
+        "SSL configuration",
+        "JSON decoding"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "Missing imports",
+        "SSL configuration",
+        "JSON decoding"
+      ]
+    },
+    "news_reader": {
+      "description": "Create a news reader app that fetches articles from NewsAPI",
+      "expected_files": [
+        "NewsService",
+        "Article",
+        "ArticleView"
+      ],
+      "common_errors": [
+        "Async/await syntax",
+        "URL handling"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "Async/await syntax",
+        "URL handling"
+      ]
+    },
+    "expense_tracker": {
+      "description": "Create an expense tracking app with charts and categories",
+      "expected_files": [
+        "Expense",
+        "ExpenseListView",
+        "ChartView",
+        "CategoryManager"
+      ],
+      "common_errors": [
+        "Chart library usage",
+        "Core Data",
+        "Complex state"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "Chart library usage",
+        "Core Data",
+        "Complex state"
+      ]
+    },
+    "fitness_tracker": {
+      "description": "Create a fitness tracking app with workout plans",
+      "expected_files": [
+        "Workout",
+        "Exercise",
+        "WorkoutView",
+        "ProgressView"
+      ],
+      "common_errors": [
+        "HealthKit integration",
+        "Complex navigation"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "HealthKit integration",
+        "Complex navigation"
+      ]
+    },
+    "recipe_book": {
+      "description": "Create a recipe book app with ingredients and instructions",
+      "expected_files": [
+        "Recipe",
+        "Ingredient",
+        "RecipeDetailView",
+        "RecipeListView"
+      ],
+      "common_errors": [
+        "Image handling",
+        "Complex data model"
+      ],
+      "would_generate": true,
+      "validator_fixes_needed": [
+        "Image handling",
+        "Complex data model"
+      ]
+    }
+  },
+  "modifications": {
+    "color_scheme": {
+      "request": "Add a color theme picker with 5 different themes",
+      "expected_changes": [
+        "@AppStorage for theme",
+        "ColorScheme enum",
+        "Theme picker view"
+      ],
+      "validator_fixes": [
+        "Enum must be Codable for AppStorage"
+      ]
+    },
+    "animation": {
+      "request": "Add smooth animations to all transitions",
+      "expected_changes": [
+        ".animation() modifiers",
+        ".transition() modifiers"
+      ],
+      "validator_fixes": [
+        "Animation deprecated warnings",
+        "Use animation(_:value:)"
+      ]
+    },
+    "layout": {
+      "request": "Change from VStack to Grid layout",
+      "expected_changes": [
+        "LazyVGrid",
+        "GridItem"
+      ],
+      "validator_fixes": [
+        "Grid syntax",
+        "Adaptive vs Fixed"
+      ]
+    },
+    "search": {
+      "request": "Add search functionality to the list",
+      "expected_changes": [
+        ".searchable modifier",
+        "@State searchText"
+      ],
+      "validator_fixes": [
+        "searchable only on NavigationView/Stack"
+      ]
+    },
+    "settings": {
+      "request": "Add a comprehensive settings screen",
+      "expected_changes": [
+        "SettingsView",
+        "UserDefaults",
+        "@AppStorage"
+      ],
+      "validator_fixes": [
+        "Missing imports",
+        "AppStorage property wrappers"
+      ]
+    },
+    "sharing": {
+      "request": "Add share functionality to export data",
+      "expected_changes": [
+        "ShareLink",
+        "ActivityViewController"
+      ],
+      "validator_fixes": [
+        "ShareLink iOS 16+",
+        "UIKit integration"
+      ]
+    },
+    "persistence": {
+      "request": "Add data persistence with Core Data",
+      "expected_changes": [
+        "@FetchRequest",
+        "NSManagedObject",
+        "PersistenceController"
+      ],
+      "validator_fixes": [
+        "Core Data boilerplate",
+        "Context in environment"
+      ]
+    },
+    "networking": {
+      "request": "Add offline caching for API responses",
+      "expected_changes": [
+        "URLCache",
+        "CachePolicy",
+        "FileManager"
+      ],
+      "validator_fixes": [
+        "Async/await syntax",
+        "Error handling"
+      ]
+    }
+  },
+  "auto_fixes": {
+    "multiple_semicolons": {
+      "errors": [
+        "Multiple semicolons"
+      ],
+      "fix": "Remove all semicolons",
+      "validator_capable": true
+    },
+    "complex_hashable": {
+      "errors": [
+        "CustomItem must conform to Hashable",
+        "Any prevents Hashable"
+      ],
+      "fix": "Add Identifiable instead of Hashable due to Any type",
+      "validator_capable": true
+    },
+    "async_await_errors": {
+      "errors": [
+        "Missing async",
+        "Missing throws",
+        "Wrong return type"
+      ],
+      "fix": "Add async throws, await, and proper return",
+      "validator_capable": false
+    },
+    "modifier_order": {
+      "errors": [
+        "Inefficient modifier order",
+        "Double padding"
+      ],
+      "fix": "Reorder modifiers for efficiency",
+      "validator_capable": true
+    },
+    "ios17_features": {
+      "errors": [
+        "symbolEffect iOS 17+",
+        "scrollBounceBehavior iOS 17+"
+      ],
+      "fix": "Replace with iOS 16 compatible alternatives",
+      "validator_capable": false
+    }
+  },
+  "complex_apps": {
+    "uber_clone": {
+      "name": "uber_clone",
+      "description": "Create a ride-sharing app like Uber",
+      "components": [
+        "Maps",
+        "Real-time tracking",
+        "Payment",
+        "User/Driver modes"
+      ],
+      "challenges": [
+        "MapKit integration",
+        "WebSocket for real-time",
+        "Complex state management"
+      ],
+      "validator_helps": [
+        "Import fixes",
+        "Async/await syntax",
+        "Protocol conformances"
+      ]
+    },
+    "instagram_clone": {
+      "name": "instagram_clone",
+      "description": "Create a photo sharing app like Instagram",
+      "components": [
+        "Camera",
+        "Filters",
+        "Feed",
+        "Stories",
+        "Direct messages"
+      ],
+      "challenges": [
+        "AVFoundation",
+        "Core Image filters",
+        "Complex UI",
+        "Video processing"
+      ],
+      "validator_helps": [
+        "Import organization",
+        "Memory management",
+        "Completion handler syntax"
+      ]
+    },
+    "banking_app": {
+      "name": "banking_app",
+      "description": "Create a secure banking application",
+      "components": [
+        "Biometric auth",
+        "Transactions",
+        "Cards",
+        "Investments"
+      ],
+      "challenges": [
+        "Security",
+        "Keychain",
+        "Encryption",
+        "Complex forms"
+      ],
+      "validator_helps": [
+        "Security attribute syntax",
+        "Error handling",
+        "Form validation"
+      ]
+    },
+    "music_streaming": {
+      "name": "music_streaming",
+      "description": "Create a music streaming app like Spotify",
+      "components": [
+        "Audio player",
+        "Playlists",
+        "Recommendations",
+        "Offline mode"
+      ],
+      "challenges": [
+        "AVAudioPlayer",
+        "Background audio",
+        "Core Data",
+        "DRM"
+      ],
+      "validator_helps": [
+        "AVFoundation imports",
+        "Background modes",
+        "Persistent storage"
+      ]
+    }
+  }
+}

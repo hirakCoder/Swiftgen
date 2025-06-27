@@ -1,0 +1,13 @@
+{
+  "title": "Validation Failure: 2025-06-26 16:19",
+  "content": "Validation failed with 1 errors:\n[DependencyValidator] Sources/Services/CurrencyService.swift: Found phantom dependency: .shared.",
+  "tags": [
+    "validation",
+    "failure",
+    "DependencyValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

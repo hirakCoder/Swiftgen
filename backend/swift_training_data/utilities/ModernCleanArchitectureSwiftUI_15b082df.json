@@ -1,0 +1,8 @@
+{
+  "repo": "ModernCleanArchitectureSwiftUI",
+  "description": "Example of Modern Domain Driven modularisation of iOS apps",
+  "file_path": "Workspace.swift",
+  "content": "import ProjectDescription\nimport ProjectDescriptionHelpers\n\nlet workspace = Workspace(\n    name: \"ModernCleanArchtecture\",\n    projects: ProjectName.allCases.map(\\.projectPath)\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:31.831183"
+}

@@ -23,7 +23,7 @@ class FileStructureManager:
             "ViewModels": ["ViewModel", "Manager", "Controller", "Store"],
             "Services": ["Service", "API", "Network", "DataStore"],
             "Utils": ["Helper", "Extension", "Utility", "Constants"],
-            "Components": ["Component", "Card", "Cell", "Row", "Item"]
+            "Views": ["Component", "Card", "Cell", "Row", "Item", "View"]  # All views in same directory
         }
         
         # File type patterns
@@ -41,22 +41,40 @@ class FileStructureManager:
         """Organize files into proper directory structure"""
         organized_files = []
         file_mapping = {}  # old_path -> new_path
+        seen_files = set()  # Track files we've already processed to prevent duplicates
         
         for file in files:
             original_path = file.get("path", "")
             content = file.get("content", "")
+            filename = os.path.basename(original_path)
             
-            # Determine proper path based on content and filename
-            proper_path = self._determine_proper_path(original_path, content)
+            # Skip SSL-related files to prevent reorganization issues
+            if any(ssl_file in filename for ssl_file in ["APIClient+SSL", "CombineNetworking+SSL", "NetworkConfiguration"]):
+                # Keep SSL files where they are
+                proper_path = original_path
+            else:
+                # Determine proper path based on content and filename
+                proper_path = self._determine_proper_path(original_path, content)
+            
+            # Prevent duplicate files
+            file_key = (filename, proper_path)
+            if file_key in seen_files:
+                self.logger.warning(f"Skipping duplicate file: {proper_path}")
+                continue
+            seen_files.add(file_key)
             
             # Update file path if needed
             if proper_path != original_path:
                 self.logger.info(f"Reorganizing {original_path} -> {proper_path}")
                 file_mapping[original_path] = proper_path
             
+            # Fix syntax errors and update imports
+            fixed_content = self._fix_swift_syntax_errors(content)
+            final_content = self._update_imports_for_new_structure(fixed_content, file_mapping)
+            
             organized_files.append({
                 "path": proper_path,
-                "content": self._update_imports_for_new_structure(content, file_mapping)
+                "content": final_content
             })
         
         return organized_files, file_mapping
@@ -95,7 +113,7 @@ class FileStructureManager:
                 elif file_type == "service":
                     return "Services"
                 elif file_type == "component":
-                    return "Components"
+                    return "Views"  # Keep components in Views to avoid import issues
                 elif file_type == "extension":
                     return "Utils"
         
@@ -120,12 +138,37 @@ class FileStructureManager:
         
         return None
     
+    def _fix_swift_syntax_errors(self, content: str) -> str:
+        """Fix common Swift syntax errors that may be introduced during modification"""
+        import re
+        
+        # Fix semicolon errors in access modifiers
+        content = re.sub(r'private\s*;\s*var', 'private var', content)
+        content = re.sub(r'public\s*;\s*var', 'public var', content)
+        content = re.sub(r'internal\s*;\s*var', 'internal var', content)
+        content = re.sub(r'fileprivate\s*;\s*var', 'fileprivate var', content)
+        
+        # Also fix for func, let, etc.
+        content = re.sub(r'private\s*;\s*func', 'private func', content)
+        content = re.sub(r'public\s*;\s*func', 'public func', content)
+        content = re.sub(r'private\s*;\s*let', 'private let', content)
+        content = re.sub(r'public\s*;\s*let', 'public let', content)
+        
+        # Fix other common semicolon issues
+        content = re.sub(r'}\s*;\s*else', '} else', content)
+        content = re.sub(r'}\s*;\s*catch', '} catch', content)
+        
+        # Fix empty parameter lists with semicolons
+        content = re.sub(r'\(\s*;\s*\)', '()', content)
+        
+        return content
+    
     def _update_imports_for_new_structure(self, content: str, file_mapping: Dict[str, str]) -> str:
         """Update import statements and references for new file structure"""
         updated_content = content
         
         # Remove invalid local module imports
-        invalid_imports = ["Components", "Views", "Models", "ViewModels", "Services", "Utils"]
+        invalid_imports = ["Views", "Models", "ViewModels", "Services", "Utils"]
         for module in invalid_imports:
             updated_content = re.sub(f"import {module}\\s*\n", "", updated_content)
         
@@ -156,9 +199,12 @@ class FileStructureManager:
                 file_dir = os.path.dirname(file_path)
                 os.makedirs(file_dir, exist_ok=True)
                 
+                # Fix common syntax errors before writing
+                content = self._fix_swift_syntax_errors(file["content"])
+                
                 # Write file
                 with open(file_path, 'w') as f:
-                    f.write(file["content"])
+                    f.write(content)
                 
                 # Verify file exists and has content
                 if os.path.exists(file_path) and os.path.getsize(file_path) > 0:

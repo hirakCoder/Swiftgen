@@ -1,0 +1,8 @@
+{
+  "repo": "Settings",
+  "description": "\u2699 Add a settings window to your macOS app in minutes",
+  "file_path": "Package.swift",
+  "content": "// swift-tools-version:5.8\nimport PackageDescription\n\nlet package = Package(\n\tname: \"Settings\",\n    defaultLocalization: \"en\",\n\tplatforms: [\n\t\t.macOS(.v10_13)\n\t],\n\tproducts: [\n\t\t.library(\n\t\t\tname: \"Settings\",\n\t\t\ttargets: [\n\t\t\t\t\"Settings\"\n\t\t\t]\n\t\t)\n\t],\n\ttargets: [\n\t\t.target(\n\t\t\tname: \"Settings\",\n\t\t\tresources: [\n\t\t\t\t.process(\"Resources\")\n\t\t\t]\n\t\t)\n\t]\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:51.896197"
+}

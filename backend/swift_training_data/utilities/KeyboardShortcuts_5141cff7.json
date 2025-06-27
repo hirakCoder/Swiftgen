@@ -1,0 +1,8 @@
+{
+  "repo": "KeyboardShortcuts",
+  "description": "\u2328\ufe0f Add user-customizable global keyboard shortcuts (hotkeys) to your macOS app in minutes",
+  "file_path": "Package.swift",
+  "content": "// swift-tools-version:5.11\nimport PackageDescription\n\nlet package = Package(\n\tname: \"KeyboardShortcuts\",\n\tdefaultLocalization: \"en\",\n\tplatforms: [\n\t\t.macOS(.v10_15)\n\t],\n\tproducts: [\n\t\t.library(\n\t\t\tname: \"KeyboardShortcuts\",\n\t\t\ttargets: [\n\t\t\t\t\"KeyboardShortcuts\"\n\t\t\t]\n\t\t)\n\t],\n\ttargets: [\n\t\t.target(\n\t\t\tname: \"KeyboardShortcuts\"\n\t\t),\n\t\t.testTarget(\n\t\t\tname: \"KeyboardShortcutsTests\",\n\t\t\tdependencies: [\n\t\t\t\t\"KeyboardShortcuts\"\n\t\t\t]\n\t\t)\n\t]\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:41.831635"
+}

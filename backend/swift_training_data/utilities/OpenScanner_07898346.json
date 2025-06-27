@@ -1,0 +1,8 @@
+{
+  "repo": "OpenScanner",
+  "description": "Fast, reliable, and free document scanner app for iPhone",
+  "file_path": "scannerApp.swift",
+  "content": "//\n//  scannerApp.swift\n//  scanner\n//\n//  Created by Slaven Radic on 2022-07-21.\n//\n\nimport SwiftUI\n\n@main\nstruct scannerApp: App {\n\t@Environment(\\.scenePhase) var scenePhase\n    let persistenceController = PersistenceController.shared\n\n    var body: some Scene {\n        WindowGroup {\n            ContentView()\n                .environment(\\.managedObjectContext, persistenceController.container.viewContext)\n        }\n\t\t.onChange(of: scenePhase) { newPhase in\n\t\t\tif newPhase == .active {\n\t\t\t\t// App is active again\n\t\t\t} else if newPhase == .inactive {\n\t\t\t\tsaveAppState()\n\t\t\t} else if newPhase == .background {\n\t\t\t\tsaveAppState()\n\t\t\t}\n\t\t}\n\t}\n\t\n\tfunc saveAppState() {\n\t}\n}\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:21:00.836936"
+}

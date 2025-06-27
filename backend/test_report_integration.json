@@ -1,0 +1,33 @@
+{
+  "timestamp": "2025-06-25T14:29:58.655320",
+  "summary": {
+    "total": 3,
+    "passed": 0,
+    "failed": 3,
+    "pass_rate": 0.0,
+    "total_time": 5.817413330078125e-05
+  },
+  "tests": [
+    {
+      "name": "US-1.1: Calculator Generation",
+      "passed": false,
+      "error": "EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'",
+      "duration": 6.9141387939453125e-06,
+      "timestamp": "2025-06-25T14:29:58.655268"
+    },
+    {
+      "name": "US-2.1: Currency Converter Generation",
+      "passed": false,
+      "error": "EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'",
+      "duration": 2.1457672119140625e-06,
+      "timestamp": "2025-06-25T14:29:58.655288"
+    },
+    {
+      "name": "US-3.1: Color Modification",
+      "passed": false,
+      "error": "EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'",
+      "duration": 1.9073486328125e-06,
+      "timestamp": "2025-06-25T14:29:58.655295"
+    }
+  ]
+}

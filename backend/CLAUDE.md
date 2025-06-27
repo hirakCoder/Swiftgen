@@ -34,10 +34,12 @@ Before diving into any problem, check if it's already documented:
 When starting work on SwiftGen:
 1. [ ] Read this CLAUDE.md file
 2. [ ] Review MASTER_ISSUES_AND_FIXES.md
-3. [ ] **NEW**: Check TOMORROW_ACTION_PLAN.md if it exists
+3. [ ] **NEW**: Check DAILY_SUMMARY_*.md from previous day
 4. [ ] Check recent session summaries
 5. [ ] Verify what's actually working vs claimed to work
 6. [ ] Test basic functionality before adding features
+7. [ ] **CRITICAL**: Review USER_STORY_TRACKER.md daily
+8. [ ] **CRITICAL**: Update story status after ANY work
 
 ## 🔴 CRITICAL ACTIVE ISSUE (Dec 19, 2024)
 **Modifications work initially then fail after a few attempts**
@@ -69,6 +71,7 @@ When starting work on SwiftGen:
 2. **Test modifications** with real examples
 3. **Document in master file** not separate docs
 4. **Verify xAI access** with proper API key
+5. **Track user stories** - Update USER_STORY_TRACKER.md daily
 
 ## 🚫 What NOT to Do
 
@@ -104,11 +107,40 @@ grep -n "Files that actually changed:" logs
 # Look for "[MAIN] Applying final SwiftUI syntax validation"
 ```
 
+## 📊 User Story Management Protocol
+
+### Daily Story Review Process
+1. **Start of Session**: Open USER_STORY_TRACKER.md
+2. **Check Status**: Review which stories are blocked/in-progress
+3. **Work on Stories**: Focus on highest priority blocked items
+4. **Update Immediately**: Change status as you work
+5. **Test Everything**: Run test suite after changes
+6. **End of Session**: Update metrics and next actions
+
+### Story Status Updates
+- **⚠️ NOT STARTED** → **🟡 IN PROGRESS** (when you begin work)
+- **🟡 IN PROGRESS** → **✅ DONE** (when ALL acceptance criteria met)
+- **🟡 IN PROGRESS** → **❌ BLOCKED** (when you hit a blocker)
+- **🔄 NEEDS RETEST** → Test it NOW, don't leave it hanging
+
+### Required Documents for Story Tracking
+1. **PRODUCT_USER_STORIES.md** - The requirements (what to build)
+2. **USER_STORY_TRACKER.md** - The status (what's done/blocked)
+3. **test_suite.py** - The validation (prove it works)
+
+### Before Claiming ANY Story is Complete
+- [ ] All acceptance criteria met
+- [ ] Automated test passing
+- [ ] No regressions introduced
+- [ ] Updated tracker with results
+
 ## 💡 Remember
 
 > "We keep going in circles because we don't check what's already been done. Break the cycle by reading the master document first."
 
+> "I want to build a proper strategy and a document with all the user stories... Then I want you to make a tracker that will track the completion, issues related to each user story"
+
 ---
 
-**Last Updated**: December 19, 2024
-**Critical**: This file and MASTER_ISSUES_AND_FIXES.md are your north star. Ignore them at your own peril.
+**Last Updated**: December 19, 2024 → Updated June 25, 2025 with User Story Tracking
+**Critical**: This file, MASTER_ISSUES_AND_FIXES.md, and USER_STORY_TRACKER.md are your north star. Ignore them at your own peril.

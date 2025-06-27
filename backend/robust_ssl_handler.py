@@ -564,36 +564,36 @@ extension Publisher where Output == URLSession.DataTaskPublisher.Output {
                 break
         
         if not api_client_found:
-            # Create APIClient+SSL.swift
+            # Create APIClient+SSL.swift in Utils to match file structure
             ssl_ext = fixes['url_session_delegate']
             modified_files.append({
-                'path': f"Sources/Networking/{ssl_ext['filename']}",
+                'path': f"Sources/Utils/{ssl_ext['filename']}",
                 'content': ssl_ext['content']
             })
             changes_made.append("Created APIClient SSL extension")
-            files_modified.append(f"Sources/Networking/{ssl_ext['filename']}")
+            files_modified.append(f"Sources/Utils/{ssl_ext['filename']}")
         
         # 4. Check if project uses Alamofire
         uses_alamofire = any('import Alamofire' in file.get('content', '') for file in files)
         if uses_alamofire:
             alamofire_fix = fixes['alamofire_fix']
             modified_files.append({
-                'path': f"Sources/Networking/{alamofire_fix['filename']}",
+                'path': f"Sources/Utils/{alamofire_fix['filename']}",
                 'content': alamofire_fix['content']
             })
             changes_made.append("Added Alamofire SSL manager")
-            files_modified.append(f"Sources/Networking/{alamofire_fix['filename']}")
+            files_modified.append(f"Sources/Utils/{alamofire_fix['filename']}")
         
         # 5. Check if project uses Combine
         uses_combine = any('import Combine' in file.get('content', '') for file in files)
         if uses_combine:
             combine_fix = fixes['combine_fix']
             modified_files.append({
-                'path': f"Sources/Networking/{combine_fix['filename']}",
+                'path': f"Sources/Utils/{combine_fix['filename']}",
                 'content': combine_fix['content']
             })
             changes_made.append("Added Combine SSL handling")
-            files_modified.append(f"Sources/Networking/{combine_fix['filename']}")
+            files_modified.append(f"Sources/Utils/{combine_fix['filename']}")
         
         return {
             "files": modified_files,

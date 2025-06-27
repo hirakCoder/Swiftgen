@@ -1,0 +1,8 @@
+{
+  "repo": "Whisperboard",
+  "description": "The open-source iOS app that's making quality voice transcription more accessible on mobile devices.",
+  "file_path": "Workspace.swift",
+  "content": "import ProjectDescription\n\nlet workspace = Workspace(\n  name: \"WhisperBoard\",\n  projects: [\".\"],\n  generationOptions: .options(\n    lastXcodeUpgradeCheck: Version(15, 4, 0)\n  )\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:21:09.381837"
+}

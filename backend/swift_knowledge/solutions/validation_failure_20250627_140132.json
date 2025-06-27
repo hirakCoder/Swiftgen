@@ -1,0 +1,13 @@
+{
+  "title": "Validation Failure: 2025-06-27 14:01",
+  "content": "Validation failed with 1 errors:\n[DependencyValidator] Sources/ViewModels/CurrencyViewModel.swift: Found phantom dependency: .shared.",
+  "tags": [
+    "validation",
+    "failure",
+    "DependencyValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "title": "Validation Failure: 2025-06-26 15:13",
+  "content": "Validation failed with 5 errors:\n[DependencyValidator] Sources/ViewModels/CurrencyViewModel.swift: Found phantom dependency: .shared.\n[DependencyValidator] Sources/Networking/APIClient+SSL.swift: Found phantom dependency: .shared.\n[DependencyValidator] Sources/Networking/APIClient+SSL.swift: Found phantom dependency: .shared.\n[DependencyValidator] Sources/Networking/CombineNetworking+SSL.swift: Found phantom dependency: .shared.\n[DependencyValidator] Sources/Networking/CombineNetworking+SSL.swift: Found phantom dependency: .shared.",
+  "tags": [
+    "validation",
+    "failure",
+    "DependencyValidator",
+    "DependencyValidator",
+    "DependencyValidator",
+    "DependencyValidator",
+    "DependencyValidator"
+  ],
+  "severity": "error",
+  "solutions": [
+    "Fix validation errors before generation"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "repo": "swiftui-drawer",
+  "description": "A SwiftUI bottom-up controller, like in the Maps app. Drag to expand or minimize.",
+  "file_path": "Package.swift",
+  "content": "// swift-tools-version:5.2\n// The swift-tools-version declares the minimum version of Swift required to build this package.\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"Drawer\",\n    platforms: [\n        .iOS(.v13)\n    ],\n    products: [\n        // Products define the executables and libraries produced by a package, and make them visible to other packages.\n        .library(\n            name: \"Drawer\",\n            targets: [\"Drawer\"]),\n    ],\n    dependencies: [\n        // Dependencies declare other packages that this package depends on.\n        // .package(url: /* package url */, from: \"1.0.0\"),\n    ],\n    targets: [\n        // Targets are the basic building blocks of a package. A target can define a module or a test suite.\n        // Targets can depend on other targets in this package, and on products in packages which this package depends on.\n        .target(\n            name: \"Drawer\",\n            dependencies: []),\n        .testTarget(\n            name: \"DrawerTests\",\n            dependencies: [\"Drawer\"]),\n    ]\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:21:03.256875"
+}

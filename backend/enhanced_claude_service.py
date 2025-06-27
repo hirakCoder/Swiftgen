@@ -594,6 +594,10 @@ MODERN SWIFT PATTERNS (MANDATORY):
 4. UI Updates: Mark UI classes/methods with @MainActor
 5. Modifiers: Use .foregroundStyle NOT .foregroundColor
 6. Concurrency: NEVER use DispatchSemaphore with async/await
+7. API Parsing: ALWAYS use proper Codable structs matching API response structure
+   - NEVER decode directly to [String: Any] or [String: Double]
+   - Create proper response models with all expected fields
+   - Handle decoding errors with descriptive messages
 
 MODULE IMPORT RULES - CRITICAL FOR SWIFTUI:
 - NEVER import local folders: NO import Components, Views, Models, ViewModels, Services
@@ -617,7 +621,7 @@ Only modify files that need to change for: "{modification}"
 Current files:
 """
             for file in files:
-                user_prompt += f"\n--- {file['path']} ---\n{file['content'][:500]}...\n"
+                user_prompt += f"\n--- {file['path']} ---\n{file['content']}\n"
             
             user_prompt += f"""
 

@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: Sources/ViewModels/CurrencyViewModel.swift:39:92: ...",
+  "content": "Error: Sources/ViewModels/CurrencyViewModel.swift:39:92: error: expected expression in conditional; Sources/ViewModels/CurrencyViewModel.swift:41:9: error: expected expression; Sources/ViewModels/CurrencyViewModel.swift:43:26: error: value of optional type 'Double?' must be unwrapped to a value of type 'Double'\n\nSolution: Fixed 4 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 4 errors using RAG patterns"
+  ]
+}

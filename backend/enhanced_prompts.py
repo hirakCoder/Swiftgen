@@ -58,6 +58,18 @@ CRITICAL SYNTAX RULES - MUST FOLLOW:
     - Do NOT use Core Data, NSManagedObject, @FetchRequest, or PersistenceController
     - Use simple in-memory storage with @State or @StateObject
     - For persistence, use UserDefaults or JSON files
+16b. API PARSING - CRITICAL FOR RELIABILITY:
+    - ALWAYS use proper Codable structs matching EXACT API response structure
+    - NEVER decode directly to [String: Any] or [String: Double]
+    - Example for currency API:
+      struct APIResponse: Codable {
+          let rates: [String: Double]
+          let base: String?
+          let date: String?
+      }
+    - ALWAYS handle API errors with proper error messages
+    - Include do-catch blocks with specific error descriptions
+    - Test your JSON decoding mentally - would it work with the real API?
 17. SWITCH STATEMENTS - MUST be exhaustive:
     - Always handle ALL cases of an enum
     - Use 'default:' case if needed
@@ -171,11 +183,17 @@ Requirements:
 5. Make the UI beautiful and intuitive
 6. Support real-world features as needed:
    - API calls with URLSession and async/await
-   - Data persistence with @AppStorage or Core Data
+   - Data persistence with @AppStorage or UserDefaults
    - MVVM architecture for complex apps
    - Multiple screens with NavigationStack
    - Error handling and loading states
    - Proper separation of concerns
+   - For API-based apps (weather, currency, stocks, etc):
+     * Create proper Codable structs for API responses
+     * Use JSONDecoder with correct types
+     * Handle decoding errors gracefully
+     * Show user-friendly error messages
+     * Example: Currency converter should decode to proper structure, not [String: Double]
 7. Create as many files as needed for proper architecture
 
 Return JSON with this EXACT structure:

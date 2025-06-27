@@ -1,0 +1,13 @@
+{
+  "title": "Learned Solution: Sources/Models/Currency.swift:12:11: error: expect...",
+  "content": "Error: Sources/Models/Currency.swift:12:11: error: expected declaration; Sources/ViewModels/CurrencyViewModel.swift:40:4: error: unexpected ';' separator; The following build commands failed:\n\nSolution: Fixed 3 errors using RAG patterns",
+  "tags": [
+    "learned",
+    "auto-generated",
+    "solution"
+  ],
+  "severity": "normal",
+  "solutions": [
+    "Fixed 3 errors using RAG patterns"
+  ]
+}

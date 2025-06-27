@@ -1,0 +1,8 @@
+{
+  "repo": "edhita",
+  "description": "Fully open source text editor for iOS written in SwiftUI.",
+  "file_path": "Constants.swift",
+  "content": "import Foundation\n\nstruct Constants {\n    static let adUnitID = \"ca-app-pub-xxxxxxxxxxxxxxxx/nnnnnnnnnn\"\n    #if DEBUG\n        static let enableAd = false\n    #endif\n}\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:53.129289"
+}

@@ -1,0 +1,91 @@
+{
+  "timestamp": "2025-06-26T11:49:07.464611",
+  "validator_active": true,
+  "app_generation": {},
+  "modifications": {
+    "color_change": {
+      "request": "Change the background color to blue",
+      "type": "color_change",
+      "processed": true,
+      "syntax_valid": true,
+      "validator_fixes": [],
+      "success": true
+    },
+    "add_button": {
+      "request": "Add a settings button",
+      "type": "add_button",
+      "processed": true,
+      "syntax_valid": true,
+      "validator_fixes": [
+        "Fixed Button struct to be Identifiable"
+      ],
+      "success": true
+    },
+    "font_size": {
+      "request": "Make the text larger",
+      "type": "font_size",
+      "processed": true,
+      "syntax_valid": true,
+      "validator_fixes": [],
+      "success": true
+    },
+    "dark_mode": {
+      "request": "Add dark mode support",
+      "type": "dark_mode",
+      "processed": true,
+      "syntax_valid": true,
+      "validator_fixes": [],
+      "success": true
+    }
+  },
+  "error_recovery": {
+    "hashable_error": {
+      "error": "Type 'CustomButton' does not conform to protocol 'Hashable'",
+      "recovered": true,
+      "recovery_method": "validator",
+      "fix_applied": "Added : Hashable to CustomButton struct",
+      "time": 0.5
+    },
+    "semicolon_error": {
+      "error": "Consecutive statements must be separated by ';'",
+      "recovered": true,
+      "recovery_method": "validator",
+      "fix_applied": "Removed 12 semicolons",
+      "time": 0.2
+    },
+    "foreach_error": {
+      "error": "Generic struct 'ForEach' requires that 'Item' conform to 'Hashable'",
+      "recovered": true,
+      "recovery_method": "validator",
+      "fix_applied": "Added id: \\.self to ForEach",
+      "time": 0.3
+    },
+    "ios_version_error": {
+      "error": "'.symbolEffect' is only available in iOS 17.0 or newer",
+      "recovered": true,
+      "recovery_method": "pattern",
+      "fix_applied": "Replaced with iOS 16 compatible animation",
+      "time": 1.2
+    }
+  },
+  "build_fixes": {
+    "calculator": {
+      "app": "calculator",
+      "error_count": 2,
+      "fixes": [
+        "Added Hashable conformance to CalculatorButton",
+        "Fixed syntax error in CalculatorViewModel"
+      ],
+      "build_success": true
+    },
+    "currency_converter": {
+      "app": "currency_converter",
+      "error_count": 2,
+      "fixes": [
+        "Added import Foundation",
+        "Removed semicolons"
+      ],
+      "build_success": true
+    }
+  }
+}

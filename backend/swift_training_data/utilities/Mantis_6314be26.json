@@ -1,0 +1,8 @@
+{
+  "repo": "Mantis",
+  "description": "An iOS Image cropping library, which mimics the Photo App written in Swift.",
+  "file_path": "Package.swift",
+  "content": "// swift-tools-version:5.5\n// The swift-tools-version declares the minimum version of Swift required to build this package.\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"Mantis\",\n    defaultLocalization: \"en\",\n    platforms: [.iOS(.v12), .macCatalyst(.v13)],\n    products: [\n        .library(\n            name: \"Mantis\",\n            targets: [\"Mantis\"])\n    ],\n    targets: [\n        .target(\n            name: \"Mantis\",\n            exclude: [\"Info.plist\", \"Resources/Info.plist\"],\n            resources: [.process(\"Resources\")],\n            swiftSettings: [.define(\"MANTIS_SPM\")]\n        )\n    ]\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:56.858960"
+}

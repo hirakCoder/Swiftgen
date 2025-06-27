@@ -1,0 +1,8 @@
+{
+  "repo": "ModernCleanArchitectureSwiftUI",
+  "description": "Example of Modern Domain Driven modularisation of iOS apps",
+  "file_path": "Tuist.swift",
+  "content": "import ProjectDescription\n\nlet config = Config(\n    generationOptions: .options(enforceExplicitDependencies: true)\n)",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:31.830613"
+}

@@ -1,0 +1,141 @@
+{
+  "timestamp": "2025-06-25T14:31:21.828403",
+  "swiftgen_version": "mvp",
+  "test_type": "system_analysis",
+  "user_stories": {
+    "US-1.1": {
+      "story_id": "US-1.1",
+      "name": "Calculator Generation",
+      "status": "FAILED",
+      "issues": [
+        "Sources/Views/ContentView.swift: Semicolon before 'var body'",
+        "Sources/Views/ContentView.swift: ResultView referenced but not defined"
+      ],
+      "details": {
+        "path": "../workspaces/proj_f9fbf399",
+        "exists": true,
+        "files": [
+          {
+            "path": "Sources/App.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/ViewModels/CurrencyViewModel.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/Models/CurrencyRate.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/Views/ResultView.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/Views/ContentView.swift",
+            "issues": [
+              "Semicolon before 'var body'",
+              "ResultView referenced but not defined"
+            ]
+          },
+          {
+            "path": "Sources/Services/CurrencyService.swift",
+            "issues": []
+          }
+        ],
+        "issues": [
+          "Sources/Views/ContentView.swift: Semicolon before 'var body'",
+          "Sources/Views/ContentView.swift: ResultView referenced but not defined"
+        ],
+        "build_ready": false
+      }
+    },
+    "US-2.1": {
+      "story_id": "US-2.1",
+      "name": "Currency Converter",
+      "status": "FAILED",
+      "issues": [
+        "Sources/Views/ContentView.swift: Semicolon before 'var body'",
+        "Sources/Views/ContentView.swift: ResultView referenced but not defined"
+      ],
+      "details": {
+        "path": "../workspaces/proj_f9fbf399",
+        "exists": true,
+        "files": [
+          {
+            "path": "Sources/App.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/ViewModels/CurrencyViewModel.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/Models/CurrencyRate.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/Views/ResultView.swift",
+            "issues": []
+          },
+          {
+            "path": "Sources/Views/ContentView.swift",
+            "issues": [
+              "Semicolon before 'var body'",
+              "ResultView referenced but not defined"
+            ]
+          },
+          {
+            "path": "Sources/Services/CurrencyService.swift",
+            "issues": []
+          }
+        ],
+        "issues": [
+          "Sources/Views/ContentView.swift: Semicolon before 'var body'",
+          "Sources/Views/ContentView.swift: ResultView referenced but not defined"
+        ],
+        "build_ready": false
+      }
+    }
+  },
+  "known_issues": [
+    {
+      "type": "SYNTAX_ERROR",
+      "description": "Semicolon before 'var body' in ContentView.swift",
+      "severity": "HIGH",
+      "user_story": "US-3.1"
+    },
+    {
+      "type": "MISSING_VIEW",
+      "description": "ResultView referenced but not defined",
+      "severity": "HIGH",
+      "user_story": "US-1.1"
+    },
+    {
+      "type": "BUILD_TIME",
+      "description": "Builds taking 6+ minutes due to retry loops",
+      "severity": "MEDIUM",
+      "user_story": "ALL"
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": "P0",
+      "action": "Fix LLM prompts to prevent semicolon generation",
+      "impact": "Affects all app generation and modifications"
+    },
+    {
+      "priority": "P0",
+      "action": "Ensure all referenced views are generated",
+      "impact": "Prevents successful builds"
+    }
+  ],
+  "summary": {
+    "total_stories_analyzed": 2,
+    "passed": 0,
+    "failed": 2,
+    "pass_rate": 0.0,
+    "critical_issues": 2,
+    "p0_recommendations": 2
+  }
+}

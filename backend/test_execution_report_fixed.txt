@@ -1,0 +1,61 @@
+INFO:enhanced_claude_service:✓ Initialized Claude 3.5 Sonnet
+INFO:enhanced_claude_service:✓ Initialized GPT-4 Turbo
+INFO:enhanced_claude_service:✓ Initialized xAI Grok
+INFO:enhanced_claude_service:Initialized 3 LLM models out of 3 supported
+INFO:enhanced_claude_service:  - Claude 3.5 Sonnet (anthropic) ✓
+INFO:enhanced_claude_service:  - GPT-4 Turbo (openai) ✓
+INFO:enhanced_claude_service:  - xAI Grok (xai) ✓
+INFO:enhanced_claude_service:Default model set to: Claude 3.5 Sonnet
+INFO:faiss.loader:Loading faiss with AVX2 support.
+INFO:faiss.loader:Successfully loaded faiss with AVX2 support.
+INFO:sentence_transformers.SentenceTransformer:Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+INFO:sentence_transformers.SentenceTransformer:Use pytorch device_name: mps
+INFO:enhanced_claude_service:✓ Initialized Claude 3.5 Sonnet
+INFO:enhanced_claude_service:✓ Initialized GPT-4 Turbo
+INFO:enhanced_claude_service:✓ Initialized xAI Grok
+INFO:enhanced_claude_service:Initialized 3 LLM models out of 3 supported
+INFO:enhanced_claude_service:  - Claude 3.5 Sonnet (anthropic) ✓
+INFO:enhanced_claude_service:  - GPT-4 Turbo (openai) ✓
+INFO:enhanced_claude_service:  - xAI Grok (xai) ✓
+INFO:enhanced_claude_service:Default model set to: Claude 3.5 Sonnet
+INFO:robust_error_recovery_system:Robust error recovery system initialized
+[RAG Cache] Loaded 0 entries from persistent cache
+[RAG] Cache manager initialized
+[RAG] Loaded existing index with 110 documents
+[RAG] Error loading swift_knowledge/patterns/swift_architectures.json: Invalid control character at: line 3 column 15 (char 84)
+[RAG] Error loading swift_knowledge/patterns/ios_version_migrations.json: Invalid control character at: line 3 column 15 (char 78)
+[RAG] Error loading swift_knowledge/patterns/swiftui_best_practices.json: Invalid control character at: line 3 column 15 (char 75)
+[RAG] Error loading swift_knowledge/solutions/comprehensive_error_solutions.json: Invalid control character at: line 3 column 15 (char 83)
+[RAG] Total documents in knowledge base: 110
+✓ RAG Knowledge Base initialized for build service
+✓ File Structure Manager initialized for build service
+✓ Debug Logger available for build service
+✓ Robust error recovery system initialized with RAG support
+============================================================
+SwiftGen Integration Test Suite
+============================================================
+
+🧪 Testing US-1.1: Calculator Generation...
+❌ US-1.1: Calculator Generation FAILED: EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'
+
+🧪 Testing US-2.1: Currency Converter Generation...
+❌ US-2.1: Currency Converter Generation FAILED: EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'
+
+🧪 Testing US-3.1: Color Modification...
+❌ US-3.1: Color Modification FAILED: EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'
+
+============================================================
+Test Results Summary
+============================================================
+Total Tests: 3
+Passed: 0 (0.0%)
+Failed: 3 (100.0%)
+Total Time: 0.0s
+============================================================
+
+Failed Tests:
+  ❌ US-1.1: Calculator Generation: EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'
+  ❌ US-2.1: Currency Converter Generation: EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'
+  ❌ US-3.1: Color Modification: EnhancedClaudeService.generate_ios_app() got an unexpected keyword argument 'include_ui_enhancements'
+
+Detailed report saved to: /Users/hirakbanerjee/Desktop/SwiftGen/swiftgen-mvp/backend/test_report_integration.json

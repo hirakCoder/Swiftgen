@@ -1,0 +1,7 @@
+{
+  "type_mappings": {
+    "ErrorView": "AppErrorView",
+    "ResultView": "OperationResultView"
+  },
+  "app_types": {}
+}

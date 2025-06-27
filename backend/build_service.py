@@ -189,24 +189,13 @@ class BuildService:
             if hasattr(self.error_recovery_system, 'ios_target_version'):
                 self.error_recovery_system.ios_target_version = "16.0"
         
-        # Set max attempts based on complexity
-        if app_complexity:
-            self.app_complexity = app_complexity
-            print(f"[BUILD] Setting complexity: {app_complexity}")
-            if app_complexity == "high":
-                self.max_attempts = 5  # More attempts for complex apps
-                print(f"[BUILD] High complexity app - setting max_attempts to 5")
-                await self._update_status("🏗️ Building complex app (may take longer)...")
-            elif app_complexity == "medium":
-                self.max_attempts = 4
-                print(f"[BUILD] Medium complexity app - setting max_attempts to 4")
-                await self._update_status("🏗️ Building medium complexity app...")
-            else:
-                self.max_attempts = 3
-                print(f"[BUILD] Low complexity app - setting max_attempts to 3")
-                await self._update_status("🏗️ Building app...")
+        # Set max attempts based on app complexity
+        self.app_complexity = app_complexity
+        if app_complexity == "complex":
+            self.max_attempts = 5  # Complex apps get more attempts
         else:
-            print(f"[BUILD] No complexity specified - using default max_attempts: {self.max_attempts}")
+            self.max_attempts = 3  # Simple apps get 3 attempts
+        print(f"[BUILD] Max attempts set to {self.max_attempts} for {app_complexity or 'simple'} app")
         
         # Initialize debug logger for this project
         if self.debug_logger is None:
@@ -337,6 +326,16 @@ class BuildService:
 
         # Fix naming consistency
         fix_naming_consistency_in_project_yml(project_path)
+        
+        # Clean up duplicate files before build
+        try:
+            from fix_info_plist_duplication import remove_duplicate_files, fix_info_plist_duplication
+            duplicates_removed = remove_duplicate_files(project_path)
+            if duplicates_removed > 0:
+                print(f"[BUILD] Removed {duplicates_removed} duplicate files")
+                await self._update_status(f"🧹 Cleaned up {duplicates_removed} duplicate files")
+        except Exception as e:
+            print(f"[BUILD] Warning: Could not clean duplicates: {e}")
 
         # Generate Xcode project
         await self._update_status("🔧 Generating Xcode project...")
@@ -459,6 +458,18 @@ class BuildService:
             if attempt < self.max_attempts:
                 await self._update_status("❌ Build failed. Analyzing errors and applying fixes...")
 
+                # Check for Info.plist duplication error first
+                info_plist_error = any("Multiple commands produce" in err and "Info.plist" in err for err in current_errors)
+                if info_plist_error:
+                    await self._update_status("🔧 Fixing Info.plist duplication issue...")
+                    try:
+                        from fix_info_plist_duplication import fix_info_plist_duplication
+                        if fix_info_plist_duplication(project_path):
+                            print("[BUILD] Fixed Info.plist duplication, retrying build")
+                            continue  # Retry build immediately
+                    except Exception as e:
+                        print(f"[BUILD] Could not fix Info.plist issue: {e}")
+                
                 # Try error recovery if available
                 if self.error_recovery_system and current_errors:
                     try:
@@ -524,7 +535,7 @@ class BuildService:
                                     # Include some context from existing files
                                     for file in swift_files[:3]:  # First 3 files for context
                                         if "ContentView" in file["path"] or "App.swift" in file["path"]:
-                                            missing_files_request += f"\n{file['path']}:\n{file['content'][:500]}...\n"
+                                            missing_files_request += f"\n{file['path']}:\n{file['content']}\n"
                                     
                                     # Ask LLM to create the missing files
                                     retry_success, created_files, _ = await self.error_recovery_system.recover_from_errors(

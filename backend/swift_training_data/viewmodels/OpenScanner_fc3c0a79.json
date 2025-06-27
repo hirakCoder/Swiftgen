@@ -1,0 +1,8 @@
+{
+  "repo": "OpenScanner",
+  "description": "Fast, reliable, and free document scanner app for iPhone",
+  "file_path": "AppState.swift",
+  "content": "//\n//  AppState.swift\n//  scanner\n//\n//  Created by Slaven Radic on 2022-07-24.\n//\n\nimport Foundation\n\nclass AppState: ObservableObject {\n\t\n\tpublic static let shared = AppState()\n\t\n\t@Published var viewState = ViewState.Home\n\t@Published var totalScans = 0\n\t\n\t@Published var iOS16Version = false\n}\n\n\nenum ViewState {\n\tcase Home, Page, Live, About\n}\n",
+  "category": "viewmodels",
+  "timestamp": "2025-06-27T15:21:00.834169"
+}

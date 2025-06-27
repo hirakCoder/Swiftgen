@@ -1,0 +1,8 @@
+{
+  "repo": "FancyScrollView",
+  "description": "A SwiftUI ScrollView Designed to imitate the App Store and Apple Music ScrollViews (with or without a Parallax Header)",
+  "file_path": "Package.swift",
+  "content": "// swift-tools-version:5.1\n// The swift-tools-version declares the minimum version of Swift required to build this package.\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"FancyScrollView\",\n    platforms: [.iOS(.v13)],\n    products: [\n        .library(\n            name: \"FancyScrollView\",\n            targets: [\"FancyScrollView\"]),\n    ],\n    targets: [\n        .target(\n            name: \"FancyScrollView\",\n            dependencies: []),\n    ]\n)\n",
+  "category": "utilities",
+  "timestamp": "2025-06-27T15:20:59.386943"
+}
