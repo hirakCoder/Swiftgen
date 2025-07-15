@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwiftGen - AI-Powered iOS App Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #0a0e27;
+            color: #e0e6ed;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin-bottom: 40px;
+            border-radius: 20px;
+        }
+
+        h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .tagline {
+            font-size: 1.2em;
+            color: #e0e6ed;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .input-section, .output-section {
+            background: #1a1f36;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        h2 {
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #a0aec0;
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 12px;
+            background: #0a0e27;
+            border: 2px solid #2d3748;
+            border-radius: 8px;
+            color: #e0e6ed;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            min-height: 150px;
+            resize: vertical;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.secondary {
+            background: #2d3748;
+        }
+
+        .status-bar {
+            margin-top: 20px;
+            padding: 15px;
+            background: #0a0e27;
+            border-radius: 8px;
+            border: 1px solid #2d3748;
+            display: none;
+        }
+
+        .status-bar.active {
+            display: block;
+        }
+
+        .status-bar.success {
+            border-color: #48bb78;
+            background: rgba(72, 187, 120, 0.1);
+        }
+
+        .status-bar.error {
+            border-color: #f56565;
+            background: rgba(245, 101, 101, 0.1);
+        }
+
+        .code-viewer {
+            background: #0a0e27;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        .file-tabs {
+            display: flex;
+            background: #1a1f36;
+            border-bottom: 2px solid #2d3748;
+            overflow-x: auto;
+        }
+
+        .file-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-right: 1px solid #2d3748;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .file-tab:hover {
+            background: #2d3748;
+        }
+
+        .file-tab.active {
+            background: #0a0e27;
+            color: #667eea;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .code-content {
+            padding: 20px;
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        pre {
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            line-height: 1.5;
+            color: #e0e6ed;
+        }
+
+        .llm-info {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 6px;
+            font-size: 14px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .llm-badge {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #667eea;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+
+        .feature-card {
+            background: #1a1f36;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+
+        .feature-icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+        }
+
+        .feature-title {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .examples {
+            margin-top: 30px;
+            padding: 20px;
+            background: #1a1f36;
+            border-radius: 12px;
+        }
+
+        .example-item {
+            margin: 10px 0;
+            padding: 10px 15px;
+            background: #0a0e27;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .example-item:hover {
+            background: #2d3748;
+            transform: translateX(5px);
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 SwiftGen</h1>
+            <p class="tagline">AI-Powered iOS App Generator - Build Swift/SwiftUI Apps with Natural Language</p>
+        </header>
+
+        <div class="main-content">
+            <div class="input-section">
+                <h2>📝 Describe Your App</h2>
+                <form id="generateForm">
+                    <div class="form-group">
+                        <label for="appName">App Name (Optional)</label>
+                        <input type="text" id="appName" placeholder="MyAwesomeApp">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="description">App Description</label>
+                        <textarea id="description" placeholder="Create a timer app with start, stop, and reset functionality. Include a circular progress indicator and time display in HH:MM:SS format." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="iosVersion">iOS Version</label>
+                        <input type="text" id="iosVersion" value="17.0" placeholder="17.0">
+                    </div>
+
+                    <div class="button-group">
+                        <button type="submit" id="generateBtn">
+                            <span class="btn-text">Generate App</span>
+                        </button>
+                        <button type="button" id="modifyBtn" class="secondary" style="display: none;">
+                            Modify App
+                        </button>
+                    </div>
+                </form>
+
+                <div id="modifySection" style="display: none; margin-top: 30px;">
+                    <h3>✏️ Modify Your App</h3>
+                    <div class="form-group">
+                        <label for="modification">Describe Modification</label>
+                        <textarea id="modification" placeholder="Add a dark mode toggle to the settings"></textarea>
+                    </div>
+                    <button type="button" id="applyModification">Apply Modification</button>
+                </div>
+
+                <div id="statusBar" class="status-bar">
+                    <span id="statusText">Ready</span>
+                </div>
+
+                <div class="llm-info" id="llmInfo">
+                    <span class="llm-badge" id="llmBadge">Claude 3.5</span>
+                    <span id="llmText">Generated by</span>
+                </div>
+
+                <div class="examples">
+                    <h3>💡 Example Apps</h3>
+                    <div class="example-item" onclick="setExample('Timer app with start, stop, reset, and lap functionality')">
+                        ⏱️ Timer App
+                    </div>
+                    <div class="example-item" onclick="setExample('Todo list app with add, delete, and mark complete features')">
+                        ✅ Todo List
+                    </div>
+                    <div class="example-item" onclick="setExample('Weather app that shows current temperature and 5-day forecast')">
+                        🌤️ Weather App
+                    </div>
+                    <div class="example-item" onclick="setExample('Calculator app with basic arithmetic operations and history')">
+                        🧮 Calculator
+                    </div>
+                </div>
+            </div>
+
+            <div class="output-section">
+                <h2>📱 Generated Code</h2>
+                <div id="codeOutput">
+                    <div class="code-viewer" style="display: none;">
+                        <div class="file-tabs" id="fileTabs"></div>
+                        <div class="code-content">
+                            <pre><code id="codeDisplay"></code></pre>
+                        </div>
+                    </div>
+                    <div id="noCode" style="text-align: center; padding: 100px 20px; opacity: 0.6;">
+                        <p style="font-size: 1.2em;">Your generated app code will appear here</p>
+                        <p style="margin-top: 10px;">Start by describing your app idea!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <div class="feature-title">Multi-LLM Support</div>
+                <p>Powered by Claude 3.5, GPT-4, and xAI Grok</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">Instant Generation</div>
+                <p>Get working SwiftUI code in seconds</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔧</div>
+                <div class="feature-title">Smart Modifications</div>
+                <p>Modify your app with natural language</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📱</div>
+                <div class="feature-title">iOS 17+ Ready</div>
+                <p>Modern SwiftUI with latest features</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let currentProjectId = null;
+        let currentFiles = [];
+
+        // Initialize WebSocket connection
+        function initWebSocket() {
+            const clientId = generateClientId();
+            const wsUrl = `ws://${window.location.host}/ws/${clientId}`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                updateStatus('Connected to SwiftGen', 'success');
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('Connection error', 'error');
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateStatus('Disconnected - Reconnecting...', 'error');
+                setTimeout(initWebSocket, 3000);
+            };
+        }
+
+        function generateClientId() {
+            return 'client_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function handleWebSocketMessage(data) {
+            switch(data.type) {
+                case 'status':
+                    updateStatus(data.message, data.status === 'error' ? 'error' : 'info');
+                    break;
+                    
+                case 'code_generated':
+                    currentProjectId = data.project_id;
+                    currentFiles = data.files;
+                    displayCode(data.files);
+                    updateStatus('App generated successfully!', 'success');
+                    showModifyButton();
+                    if (data.llm_used) {
+                        showLLMInfo('Generated by', data.llm_used);
+                    }
+                    break;
+                    
+                case 'code_modified':
+                    currentFiles = data.files;
+                    displayCode(data.files);
+                    updateStatus('App modified successfully!', 'success');
+                    if (data.llm_used) {
+                        showLLMInfo('Modified by', data.llm_used);
+                    }
+                    break;
+                    
+                case 'error':
+                    updateStatus(data.message, 'error');
+                    break;
+            }
+        }
+
+        function showLLMInfo(text, llm) {
+            const llmInfo = document.getElementById('llmInfo');
+            const llmBadge = document.getElementById('llmBadge');
+            const llmText = document.getElementById('llmText');
+            
+            llmInfo.style.display = 'flex';
+            llmText.textContent = text || 'Generated by';
+            
+            // Format LLM name
+            const llmNames = {
+                'claude-3.5-sonnet': 'Claude 3.5',
+                'gpt-4-turbo': 'GPT-4',
+                'grok-beta': 'xAI Grok'
+            };
+            
+            llmBadge.textContent = llmNames[llm] || llm;
+        }
+
+        function updateStatus(message, type = 'info') {
+            const statusBar = document.getElementById('statusBar');
+            const statusText = document.getElementById('statusText');
+            
+            statusBar.className = 'status-bar active';
+            if (type === 'success') {
+                statusBar.classList.add('success');
+            } else if (type === 'error') {
+                statusBar.classList.add('error');
+            }
+            
+            statusText.textContent = message;
+        }
+
+        function displayCode(files) {
+            if (!files || files.length === 0) return;
+            
+            const codeViewer = document.querySelector('.code-viewer');
+            const noCode = document.getElementById('noCode');
+            const fileTabs = document.getElementById('fileTabs');
+            const codeDisplay = document.getElementById('codeDisplay');
+            
+            // Show code viewer, hide placeholder
+            codeViewer.style.display = 'block';
+            noCode.style.display = 'none';
+            
+            // Clear existing tabs
+            fileTabs.innerHTML = '';
+            
+            // Create tabs for each file
+            files.forEach((file, index) => {
+                const tab = document.createElement('div');
+                tab.className = 'file-tab';
+                if (index === 0) tab.classList.add('active');
+                tab.textContent = file.name;
+                tab.onclick = () => showFile(index);
+                fileTabs.appendChild(tab);
+            });
+            
+            // Show first file
+            showFile(0);
+        }
+
+        function showFile(index) {
+            const tabs = document.querySelectorAll('.file-tab');
+            const codeDisplay = document.getElementById('codeDisplay');
+            
+            // Update active tab
+            tabs.forEach((tab, i) => {
+                if (i === index) {
+                    tab.classList.add('active');
+                } else {
+                    tab.classList.remove('active');
+                }
+            });
+            
+            // Display file content
+            if (currentFiles[index]) {
+                codeDisplay.textContent = currentFiles[index].content;
+                highlightSwift(codeDisplay);
+            }
+        }
+
+        function highlightSwift(element) {
+            // Simple Swift syntax highlighting
+            let code = element.textContent;
+            
+            // Keywords
+            const keywords = ['import', 'struct', 'class', 'enum', 'protocol', 'func', 'var', 'let', 
+                            'if', 'else', 'for', 'while', 'return', 'true', 'false', 'nil',
+                            'self', 'super', 'init', 'deinit', 'extension', 'typealias'];
+            
+            keywords.forEach(keyword => {
+                const regex = new RegExp(`\\b${keyword}\\b`, 'g');
+                code = code.replace(regex, `<span style="color: #ff79c6;">${keyword}</span>`);
+            });
+            
+            // Types
+            const types = ['String', 'Int', 'Double', 'Float', 'Bool', 'View', 'Text', 'Button',
+                         'VStack', 'HStack', 'ZStack', 'List', 'NavigationView', 'Color'];
+            
+            types.forEach(type => {
+                const regex = new RegExp(`\\b${type}\\b`, 'g');
+                code = code.replace(regex, `<span style="color: #8be9fd;">${type}</span>`);
+            });
+            
+            // Strings
+            code = code.replace(/"([^"]*)"/g, '<span style="color: #f1fa8c;">"$1"</span>');
+            
+            // Comments
+            code = code.replace(/\/\/(.*)$/gm, '<span style="color: #6272a4;">//$1</span>');
+            
+            element.innerHTML = code;
+        }
+
+        function showModifyButton() {
+            document.getElementById('modifyBtn').style.display = 'block';
+        }
+
+        function setExample(description) {
+            document.getElementById('description').value = description;
+            document.getElementById('description').focus();
+        }
+
+        // Form handlers
+        document.getElementById('generateForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const generateBtn = document.getElementById('generateBtn');
+            const btnText = generateBtn.querySelector('.btn-text');
+            
+            generateBtn.disabled = true;
+            btnText.innerHTML = '<span class="loading-spinner"></span> Generating...';
+            
+            const data = {
+                description: document.getElementById('description').value,
+                app_name: document.getElementById('appName').value || null,
+                ios_version: document.getElementById('iosVersion').value || "17.0"
+            };
+            
+            try {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.detail || 'Generation failed');
+                }
+                
+                // WebSocket will handle the UI updates
+                
+            } catch (error) {
+                updateStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                generateBtn.disabled = false;
+                btnText.textContent = 'Generate App';
+            }
+        });
+
+        document.getElementById('modifyBtn').addEventListener('click', () => {
+            const modifySection = document.getElementById('modifySection');
+            modifySection.style.display = modifySection.style.display === 'none' ? 'block' : 'none';
+            document.getElementById('modification').focus();
+        });
+
+        document.getElementById('applyModification').addEventListener('click', async () => {
+            if (!currentProjectId) {
+                updateStatus('No project to modify', 'error');
+                return;
+            }
+            
+            const modification = document.getElementById('modification').value;
+            if (!modification.trim()) {
+                updateStatus('Please describe your modification', 'error');
+                return;
+            }
+            
+            const btn = document.getElementById('applyModification');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner"></span> Modifying...';
+            
+            try {
+                const response = await fetch('/api/modify', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        project_id: currentProjectId,
+                        modification: modification
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.detail || 'Modification failed');
+                }
+                
+                // Clear modification input
+                document.getElementById('modification').value = '';
+                
+            } catch (error) {
+                updateStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Apply Modification';
+            }
+        });
+
+        // Initialize on load
+        window.addEventListener('load', () => {
+            initWebSocket();
+        });
+    </script>
+</body>
+</html>

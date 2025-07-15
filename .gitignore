@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs and temporary files
+logs/
+*.log
+build_logs/
+*.tmp
+*.temp
+.cache/
+
+# Project specific - test outputs
+workspaces/*
+!workspaces/.gitkeep
+test_workspaces/
+test_projects/
+
+# Xcode and iOS
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+*.app
+build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Backups
+backups/
+*.backup
+*.bak
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Keep important empty directories
+!backend/logs/.gitkeep
+!backend/build_logs/.gitkeep

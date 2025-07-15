@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-07-15T12:18:58.627979",
+  "results": {
+    "simple": [
+      {
+        "app": "timer",
+        "success": false,
+        "message": "Request timeout"
+      },
+      {
+        "app": "todo",
+        "success": false,
+        "message": "Request timeout"
+      },
+      {
+        "app": "counter",
+        "success": false,
+        "message": "Request timeout"
+      }
+    ],
+    "medium": [
+      {
+        "app": "calculator",
+        "success": false,
+        "message": "Request timeout"
+      },
+      {
+        "app": "weather",
+        "success": false,
+        "message": "Request timeout"
+      }
+    ],
+    "complex": [],
+    "modifications": []
+  },
+  "summary": {
+    "total_tests": 5,
+    "total_success": 0,
+    "success_rate": 0.0
+  }
+}

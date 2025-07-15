@@ -1,0 +1,62 @@
+{
+  "simple_apps": [
+    {
+      "success": false,
+      "app_type": "timer",
+      "description": "Create a simple timer app",
+      "error": "All connection attempts failed",
+      "duration": 0.09948897361755371
+    },
+    {
+      "success": false,
+      "app_type": "todo",
+      "description": "Build a todo list app",
+      "error": "All connection attempts failed",
+      "duration": 0.010801076889038086
+    },
+    {
+      "success": false,
+      "app_type": "counter",
+      "description": "Make a counter app with increment and decrement buttons",
+      "error": "All connection attempts failed",
+      "duration": 0.010974407196044922
+    }
+  ],
+  "medium_apps": [
+    {
+      "success": false,
+      "app_type": "calculator",
+      "description": "Create a calculator app with basic operations",
+      "error": "All connection attempts failed",
+      "duration": 0.01140594482421875
+    },
+    {
+      "success": false,
+      "app_type": "weather",
+      "description": "Build a weather app that shows current weather",
+      "error": "All connection attempts failed",
+      "duration": 0.011886835098266602
+    }
+  ],
+  "complex_apps": [
+    {
+      "success": false,
+      "app_type": "food_delivery",
+      "description": "Create a food delivery app with restaurant listings and ordering",
+      "error": "All connection attempts failed",
+      "duration": 0.011027812957763672
+    },
+    {
+      "success": false,
+      "app_type": "social_media",
+      "description": "Build a social media app with posts and comments",
+      "error": "All connection attempts failed",
+      "duration": 0.012588977813720703
+    }
+  ],
+  "modifications": [],
+  "auto_fixes": [],
+  "ssl_tests": [],
+  "llm_failover": [],
+  "websocket": []
+}

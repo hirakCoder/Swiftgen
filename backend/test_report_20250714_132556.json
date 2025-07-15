@@ -1,0 +1,83 @@
+{
+  "timestamp": "2025-07-14T13:25:56.028909",
+  "summary": {
+    "total": 9,
+    "passed": 2,
+    "failed": 7,
+    "success_rate": 22.22222222222222
+  },
+  "results": [
+    {
+      "description": "Create a simple timer app with start and stop buttons",
+      "complexity": "simple",
+      "success": true,
+      "error": null,
+      "time": 90.14009380340576,
+      "project_id": "proj_7ad9eb1c"
+    },
+    {
+      "description": "Build a counter app with increment and decrement",
+      "complexity": "simple",
+      "success": true,
+      "error": null,
+      "time": 90.01166987419128,
+      "project_id": "proj_240daa32"
+    },
+    {
+      "description": "Make a hello world app with a greeting message",
+      "complexity": "simple",
+      "success": false,
+      "error": "Exception: ReadTimeout: ",
+      "time": 0,
+      "project_id": "proj_550ddfca"
+    },
+    {
+      "description": "Build a todo list app with add, delete, and mark complete",
+      "complexity": "medium",
+      "success": false,
+      "error": "Exception: ReadTimeout: ",
+      "time": 0,
+      "project_id": null
+    },
+    {
+      "description": "Create a calculator app with basic math operations",
+      "complexity": "medium",
+      "success": false,
+      "error": "Exception: ReadTimeout: ",
+      "time": 0,
+      "project_id": "proj_0bdbc3ee"
+    },
+    {
+      "description": "Make a notes app with create, edit, and delete features",
+      "complexity": "medium",
+      "success": false,
+      "error": "Exception: ReadTimeout: ",
+      "time": 0,
+      "project_id": "proj_36d8a8b8"
+    },
+    {
+      "description": "Create a weather app that shows current weather using API",
+      "complexity": "complex",
+      "success": false,
+      "error": "Exception: ReadTimeout: ",
+      "time": 0,
+      "project_id": null
+    },
+    {
+      "description": "Build a currency converter with live exchange rates",
+      "complexity": "complex",
+      "success": false,
+      "error": "Exception: ReadTimeout: ",
+      "time": 0,
+      "project_id": "proj_c6096f9f"
+    },
+    {
+      "description": "Make a fitness tracker with workouts and progress",
+      "complexity": "complex",
+      "success": false,
+      "error": "Exception: ReadTimeout: ",
+      "time": 0,
+      "project_id": null
+    }
+  ]
+}
