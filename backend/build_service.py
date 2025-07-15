@@ -12,6 +12,7 @@ from models import BuildStatus, BuildResult
 # Import error recovery system
 try:
     from robust_error_recovery_system import RobustErrorRecoverySystem
+    from ssl_integration import ssl_integration
     from claude_service import ClaudeService
     from enhanced_claude_service import EnhancedClaudeService
     from user_friendly_errors import UserFriendlyErrorHandler
@@ -456,6 +457,55 @@ class BuildService:
             if attempt < self.max_attempts:
                 await self._update_status("❌ Build failed. Analyzing errors and applying fixes...")
 
+                # Check for SSL/certificate errors first
+                ssl_errors = [err for err in current_errors if any(
+                    keyword in err.lower() for keyword in ['ssl', 'certificate', 'transport security', 'https', 'tls']
+                )]
+                
+                if ssl_errors:
+                    print(f"[BUILD] Detected SSL/certificate errors, attempting SSL-specific recovery")
+                    await self._update_status("🔐 Detected SSL/certificate issues. Applying security fixes...")
+                    
+                    try:
+                        # Get current files
+                        files_dict = {}
+                        for file in swift_files:
+                            if isinstance(file, dict) and "path" in file and "content" in file:
+                                files_dict[file["path"]] = file["content"]
+                        
+                        # Apply SSL fixes
+                        ssl_fixed = False
+                        ssl_updated_files = files_dict.copy()
+                        
+                        for ssl_error in ssl_errors[:3]:  # Process first 3 SSL errors
+                            success, updated_files = ssl_integration.handle_ssl_error(
+                                ssl_error, ssl_updated_files, project_path
+                            )
+                            if success:
+                                ssl_updated_files = updated_files
+                                ssl_fixed = True
+                        
+                        if ssl_fixed:
+                            # Convert back to swift_files format
+                            fixed_files = []
+                            for path, content in ssl_updated_files.items():
+                                fixed_files.append({"path": path, "content": content})
+                            
+                            # Write fixed files
+                            for file in fixed_files:
+                                file_path = os.path.join(project_path, file["path"])
+                                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                                with open(file_path, 'w') as f:
+                                    f.write(file["content"])
+                            
+                            swift_files = fixed_files
+                            await self._update_status("✅ Applied SSL/certificate fixes. Rebuilding...")
+                            recovery_applied = True
+                            continue
+                            
+                    except Exception as e:
+                        print(f"[BUILD] SSL recovery error: {str(e)}")
+                
                 # Try error recovery if available
                 if self.error_recovery_system and current_errors:
                     try:

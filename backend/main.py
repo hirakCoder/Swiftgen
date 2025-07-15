@@ -32,6 +32,9 @@ from advanced_app_generator import AdvancedAppGenerator
 # Import comprehensive logging system
 from comprehensive_logger import logger, log_info, log_error, log_warn, LogTimer, Component
 
+# Import SSL integration
+from ssl_integration import ssl_integration
+
 # Import WebSocket monitoring
 from websocket_monitor import ws_monitor, handle_websocket_connection
 
@@ -904,6 +907,30 @@ Important: Return ONLY valid JSON, no explanatory text."""
                 
         except Exception as e:
             print(f"[MAIN] Swift validation error: {e}")
+
+        # Step 2.5: Add SSL support for apps that use HTTPS
+        try:
+            # Get files from generated_code
+            files_dict = {}
+            for file_obj in generated_code.get("files", []):
+                files_dict[file_obj["path"]] = file_obj["content"]
+            
+            # Add SSL support preemptively
+            updated_files = ssl_integration.preemptively_add_ssl_support(files_dict)
+            
+            # Update generated_code with SSL-enabled files
+            for file_obj in generated_code.get("files", []):
+                if file_obj["path"] in updated_files:
+                    file_obj["content"] = updated_files[file_obj["path"]]
+                    
+            log_info(Component.GENERATION, "ssl_support_added", 
+                    "Added SSL/HTTPS support to generated app", 
+                    project_id=project_id)
+                    
+        except Exception as e:
+            log_warn(Component.GENERATION, "ssl_support_failed", 
+                    f"Failed to add SSL support: {str(e)}", 
+                    project_id=project_id)
 
         # Step 3: Create project
         await notify_clients(project_id, {
